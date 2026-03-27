@@ -1,0 +1,4 @@
+node_modules/
+lib/sql-wasm.cjs
+lib/sql-wasm.wasm
+lib/sql-wasm.js

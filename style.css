@@ -1,0 +1,208 @@
+/* NeuroCore Dashboard Styles */
+
+#neurocore-panel {
+  padding: 10px;
+  font-family: inherit;
+}
+
+#neurocore-panel h3 {
+  margin: 0 0 10px 0;
+  color: var(--SmartThemeBodyColor, #ddd);
+  font-size: 1.1em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Status bar */
+.neurocore-status {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.neurocore-stat {
+  background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.3));
+  border-radius: 6px;
+  padding: 8px 10px;
+  text-align: center;
+}
+
+.neurocore-stat .stat-label {
+  font-size: 0.75em;
+  color: var(--SmartThemeBodyColor, #aaa);
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.neurocore-stat .stat-value {
+  font-size: 1.3em;
+  font-weight: bold;
+  color: var(--SmartThemeBodyColor, #fff);
+}
+
+/* Brain region activity indicators */
+.neurocore-regions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.neurocore-region {
+  background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.2));
+  border-radius: 12px;
+  padding: 4px 10px;
+  font-size: 0.8em;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.neurocore-region .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.dot-active { background: #4caf50; }
+.dot-moderate { background: #ff9800; }
+.dot-inactive { background: #666; }
+
+/* Tabs */
+.neurocore-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--SmartThemeBorderColor, #444);
+}
+
+.neurocore-tab {
+  padding: 6px 12px;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--SmartThemeBodyColor, #aaa);
+  font-size: 0.85em;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.neurocore-tab:hover {
+  color: var(--SmartThemeBodyColor, #fff);
+}
+
+.neurocore-tab.active {
+  color: var(--SmartThemeBodyColor, #fff);
+  border-bottom-color: var(--SmartThemeQuoteColor, #7b68ee);
+}
+
+.neurocore-tab-content {
+  display: none;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.neurocore-tab-content.active {
+  display: block;
+}
+
+/* Memory list */
+.neurocore-memory-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.neurocore-memory-item {
+  padding: 8px;
+  margin-bottom: 4px;
+  background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.2));
+  border-radius: 4px;
+  border-left: 3px solid transparent;
+  font-size: 0.85em;
+}
+
+.neurocore-memory-item.high-valence {
+  border-left-color: #e53935;
+}
+
+.neurocore-memory-item.medium-valence {
+  border-left-color: #ff9800;
+}
+
+.neurocore-memory-item.low-valence {
+  border-left-color: #4caf50;
+}
+
+.neurocore-memory-item .memory-content {
+  color: var(--SmartThemeBodyColor, #ddd);
+  margin-bottom: 4px;
+}
+
+.neurocore-memory-item .memory-meta {
+  font-size: 0.75em;
+  color: var(--SmartThemeBodyColor, #888);
+}
+
+/* Graph canvas */
+#neurocore-graph-canvas {
+  width: 100%;
+  height: 300px;
+  background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.3));
+  border-radius: 6px;
+}
+
+/* Actions */
+.neurocore-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.neurocore-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--SmartThemeBorderColor, #555);
+  border-radius: 4px;
+  background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.3));
+  color: var(--SmartThemeBodyColor, #ddd);
+  cursor: pointer;
+  font-size: 0.8em;
+  transition: background 0.2s;
+}
+
+.neurocore-btn:hover {
+  background: var(--SmartThemeBlurTintColor, rgba(255, 255, 255, 0.1));
+}
+
+.neurocore-btn.danger {
+  border-color: #e53935;
+  color: #e53935;
+}
+
+/* Settings */
+.neurocore-settings label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  font-size: 0.85em;
+  color: var(--SmartThemeBodyColor, #ddd);
+}
+
+.neurocore-settings input[type="range"] {
+  width: 120px;
+}
+
+.neurocore-settings input[type="number"] {
+  width: 60px;
+  background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.3));
+  border: 1px solid var(--SmartThemeBorderColor, #555);
+  color: var(--SmartThemeBodyColor, #ddd);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
