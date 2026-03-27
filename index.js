@@ -344,10 +344,17 @@ async function onImport() {
 }
 
 async function onConsolidate() {
+  console.log('[NeuroCore] Consolidate button clicked, isInitialized:', isInitialized, 'db:', !!neuro.db);
+  if (!neuro.db) {
+    console.warn('[NeuroCore] Cannot consolidate — database not initialized');
+    return;
+  }
   try {
     const msgCount = neuro.db.getMessageCount();
+    console.log('[NeuroCore] Running consolidation, message count:', msgCount);
     await neuro.consolidation.runFullCycle(msgCount);
     await neuro.db.save();
+    console.log('[NeuroCore] Consolidation complete');
     refreshDashboard();
   } catch (err) {
     console.error('[NeuroCore] Consolidation failed:', err);
@@ -357,6 +364,7 @@ async function onConsolidate() {
 // --- Event Handlers ---
 
 async function onMessageReceived(messageIndex) {
+  console.log('[NeuroCore] message_received fired, index:', messageIndex, 'isInitialized:', isInitialized);
   if (!isInitialized) return;
   try {
     const context = SillyTavern.getContext();
@@ -369,7 +377,9 @@ async function onMessageReceived(messageIndex) {
 
     if (!text.trim()) return;
 
+    console.log('[NeuroCore] Processing message from', sender, '- length:', text.length);
     const episodeId = await neuro.processMessage(text, sender, messageIndex);
+    console.log('[NeuroCore] Stored episode:', episodeId);
     messageEpisodeMap.set(messageIndex, episodeId);
     refreshDashboard();
   } catch (err) {

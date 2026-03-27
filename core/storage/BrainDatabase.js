@@ -13,30 +13,40 @@ export class BrainDatabase {
 
   async open(chatId) {
     this.chatId = chatId;
+    console.log('[NeuroCore/DB] Opening database for chat:', chatId);
 
     // Initialize sql.js WASM engine
     if (!this.SQL) {
-      this.SQL = await initSqlJs({
-        locateFile: (file) => {
-          if (typeof window !== 'undefined') {
-            return `/scripts/extensions/third-party/neurocore/lib/${file}`;
-          }
-          // Node.js: use fileURLToPath to get a proper OS path (avoids double C:\ on Windows)
-          const url = new URL(`../../lib/${file}`, import.meta.url);
-          if (url.protocol === 'file:') {
-            // Convert file:///C:/... to C:\... properly
-            return decodeURIComponent(url.pathname.replace(/^\/([A-Z]:)/, '$1'));
-          }
-          return url.pathname;
-        },
-      });
+      try {
+        console.log('[NeuroCore/DB] Loading sql.js WASM...');
+        this.SQL = await initSqlJs({
+          locateFile: (file) => {
+            if (typeof window !== 'undefined') {
+              const url = `/scripts/extensions/third-party/neurocore/lib/${file}`;
+              console.log('[NeuroCore/DB] locateFile:', file, '->', url);
+              return url;
+            }
+            const url = new URL(`../../lib/${file}`, import.meta.url);
+            if (url.protocol === 'file:') {
+              return decodeURIComponent(url.pathname.replace(/^\/([A-Z]:)/, '$1'));
+            }
+            return url.pathname;
+          },
+        });
+        console.log('[NeuroCore/DB] sql.js loaded successfully');
+      } catch (err) {
+        console.error('[NeuroCore/DB] Failed to load sql.js:', err);
+        throw err;
+      }
     }
 
     // Try to load existing DB from IndexedDB (browser) or memory (tests)
     const savedData = await this._loadFromStorage(chatId);
     if (savedData) {
+      console.log('[NeuroCore/DB] Loaded existing DB from IndexedDB, size:', savedData.length);
       this.db = new this.SQL.Database(savedData);
     } else {
+      console.log('[NeuroCore/DB] Creating new database');
       this.db = new this.SQL.Database();
       await this._runMigrations();
     }
@@ -50,6 +60,7 @@ export class BrainDatabase {
       await this._runMigrations(parseInt(version));
     }
 
+    console.log('[NeuroCore/DB] Database ready, schema version:', this._getMetaValue('schema_version'));
     return this;
   }
 
