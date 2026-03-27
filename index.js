@@ -33,6 +33,14 @@ async function initExtension() {
     const llmCallback = createLlmCallback(context);
     await neuro.initialize(chatId, {}, llmCallback);
     isInitialized = true;
+
+    // Auto-import existing chat messages into the brain
+    const imported = await importExistingChat();
+    if (imported > 0) {
+      await neuro.db.save();
+      console.log('[NeuroCore] Initial import: %d messages', imported);
+    }
+
     refreshDashboard();
   }
 
@@ -343,6 +351,47 @@ async function onImport() {
   input.click();
 }
 
+async function importExistingChat() {
+  const context = SillyTavern.getContext();
+  const chat = context.chat;
+  if (!chat || chat.length === 0) {
+    console.log('[NeuroCore] No chat messages to import');
+    return 0;
+  }
+
+  // Check how many episodes we already have — skip if chat already imported
+  const existingCount = neuro.db.getMessageCount();
+  if (existingCount >= chat.length) {
+    console.log('[NeuroCore] Chat already imported (%d episodes, %d messages)', existingCount, chat.length);
+    return 0;
+  }
+
+  console.log('[NeuroCore] Importing %d existing chat messages (had %d)...', chat.length, existingCount);
+  let imported = 0;
+
+  for (let i = 0; i < chat.length; i++) {
+    const msg = chat[i];
+    // Skip system/narrator messages without content
+    const text = msg.mes || '';
+    if (!text.trim()) continue;
+
+    // Skip if already tracked
+    if (messageEpisodeMap.has(i)) continue;
+
+    const sender = msg.is_user ? 'user' : (msg.name || 'character');
+    try {
+      const episodeId = await neuro.processMessage(text, sender, i);
+      messageEpisodeMap.set(i, episodeId);
+      imported++;
+    } catch (err) {
+      console.warn('[NeuroCore] Failed to import message %d:', i, err.message);
+    }
+  }
+
+  console.log('[NeuroCore] Imported %d messages', imported);
+  return imported;
+}
+
 async function onConsolidate() {
   console.log('[NeuroCore] Consolidate button clicked, isInitialized:', isInitialized, 'db:', !!neuro.db);
   if (!neuro.db) {
@@ -350,6 +399,12 @@ async function onConsolidate() {
     return;
   }
   try {
+    // First import any existing chat messages that aren't in the DB yet
+    const imported = await importExistingChat();
+    if (imported > 0) {
+      console.log('[NeuroCore] Imported %d messages before consolidation', imported);
+    }
+
     const msgCount = neuro.db.getMessageCount();
     console.log('[NeuroCore] Running consolidation, message count:', msgCount);
     await neuro.consolidation.runFullCycle(msgCount);
@@ -399,8 +454,15 @@ async function onChatChanged() {
     const llmCallback = createLlmCallback(context);
     await neuro.switchChat(newChatId, llmCallback);
     isInitialized = true;
+
+    // Auto-import existing chat messages into the brain
+    const imported = await importExistingChat();
+    if (imported > 0) {
+      await neuro.db.save();
+    }
+
     refreshDashboard();
-    console.log('[NeuroCore] Switched to chat:', newChatId);
+    console.log('[NeuroCore] Switched to chat:', newChatId, '- imported', imported, 'messages');
   } catch (err) {
     console.error('[NeuroCore] Error switching chat:', err);
   }
