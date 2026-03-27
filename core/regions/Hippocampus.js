@@ -7,15 +7,24 @@ export class Hippocampus {
     this.db = db;
   }
 
-  storeEpisode({ content, participants, emotionalValence, messageCount }) {
+  hasEpisodeByExternalId(externalId) {
+    if (!externalId) return false;
+    const existing = this.db.get(
+      'SELECT id FROM episodes WHERE external_id = ?', [externalId]
+    );
+    return existing ? existing.id : false;
+  }
+
+  storeEpisode({ content, participants, emotionalValence, messageCount, externalId = null }) {
+
     const id = randomUUID();
     const keywords = extractKeywords(content);
     const keywordsJson = JSON.stringify(keywords.map(k => k.word));
 
     this.db.run(
-      `INSERT INTO episodes (id, timestamp, content, keywords, participants, emotional_valence, decay_base_time, retrieval_count, last_retrieved, consolidated)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0)`,
-      [id, Date.now(), content, keywordsJson, JSON.stringify(participants), emotionalValence, messageCount]
+      `INSERT INTO episodes (id, timestamp, content, keywords, participants, emotional_valence, decay_base_time, retrieval_count, last_retrieved, consolidated, external_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?)`,
+      [id, Date.now(), content, keywordsJson, JSON.stringify(participants), emotionalValence, messageCount, externalId]
     );
 
     // Insert into episode_keywords junction table for indexed lookup

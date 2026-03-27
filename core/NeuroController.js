@@ -74,19 +74,20 @@ export class NeuroController {
     }, this.settings.inactivityTimeoutMs);
   }
 
-  async processMessage(messageText, sender, messageIndex) {
+  async processMessage(messageText, sender, messageIndex, externalId = null) {
     const msgCount = this.db.incrementMessageCount();
     this._resetInactivityTimer();
 
     // 1. Emotional analysis
     const emotional = this.amygdala.analyze(messageText);
 
-    // 2. Store episode
+    // 2. Store episode (with deduplication via externalId)
     const episodeId = this.hippocampus.storeEpisode({
       content: messageText,
       participants: [sender],
       emotionalValence: emotional.valence,
       messageCount: msgCount,
+      externalId,
     });
     this.amygdala.saveEmotionalTags(this.db, episodeId, emotional.emotions);
 

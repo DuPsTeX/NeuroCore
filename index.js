@@ -351,6 +351,12 @@ async function onImport() {
   input.click();
 }
 
+function getMessageExternalId(msg, index) {
+  // Use send_date as unique ID; fallback to index-based hash
+  if (msg.send_date) return String(msg.send_date);
+  return `msg-idx-${index}-${(msg.mes || '').length}`;
+}
+
 async function importExistingChat() {
   const context = SillyTavern.getContext();
   const chat = context.chat;
@@ -359,28 +365,28 @@ async function importExistingChat() {
     return 0;
   }
 
-  // Check how many episodes we already have — skip if chat already imported
-  const existingCount = neuro.db.getMessageCount();
-  if (existingCount >= chat.length) {
-    console.log('[NeuroCore] Chat already imported (%d episodes, %d messages)', existingCount, chat.length);
-    return 0;
-  }
-
-  console.log('[NeuroCore] Importing %d existing chat messages (had %d)...', chat.length, existingCount);
+  console.log('[NeuroCore] Importing existing chat messages (%d total)...', chat.length);
   let imported = 0;
+  let skipped = 0;
 
   for (let i = 0; i < chat.length; i++) {
     const msg = chat[i];
-    // Skip system/narrator messages without content
     const text = msg.mes || '';
     if (!text.trim()) continue;
 
-    // Skip if already tracked
-    if (messageEpisodeMap.has(i)) continue;
+    const externalId = getMessageExternalId(msg, i);
+
+    // Deduplicate: skip if already in DB
+    const existingId = neuro.hippocampus.hasEpisodeByExternalId(externalId);
+    if (existingId) {
+      messageEpisodeMap.set(i, existingId);
+      skipped++;
+      continue;
+    }
 
     const sender = msg.is_user ? 'user' : (msg.name || 'character');
     try {
-      const episodeId = await neuro.processMessage(text, sender, i);
+      const episodeId = await neuro.processMessage(text, sender, i, externalId);
       messageEpisodeMap.set(i, episodeId);
       imported++;
     } catch (err) {
@@ -388,7 +394,7 @@ async function importExistingChat() {
     }
   }
 
-  console.log('[NeuroCore] Imported %d messages', imported);
+  console.log('[NeuroCore] Imported %d new messages, %d already known', imported, skipped);
   return imported;
 }
 
@@ -432,8 +438,9 @@ async function onMessageReceived(messageIndex) {
 
     if (!text.trim()) return;
 
+    const externalId = getMessageExternalId(msg, messageIndex);
     console.log('[NeuroCore] Processing message from', sender, '- length:', text.length);
-    const episodeId = await neuro.processMessage(text, sender, messageIndex);
+    const episodeId = await neuro.processMessage(text, sender, messageIndex, externalId);
     console.log('[NeuroCore] Stored episode:', episodeId);
     messageEpisodeMap.set(messageIndex, episodeId);
     refreshDashboard();

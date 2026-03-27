@@ -1,7 +1,7 @@
 // core/storage/BrainDatabase.js
 import initSqlJs from '../../lib/sql-wasm-esm.js';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const IDB_PREFIX = 'neurocore-brain-';
 
 export class BrainDatabase {
@@ -68,11 +68,15 @@ export class BrainDatabase {
     if (fromVersion < 1) {
       const sql = await this._loadMigration('001_initial.sql');
       this.db.exec(sql);
-      this._setMeta('schema_version', String(SCHEMA_VERSION));
       this._setMeta('message_count', '0');
       this._setMeta('created_at', String(Date.now()));
       this._setMeta('last_consolidation', '0');
     }
+    if (fromVersion < 2) {
+      const sql = await this._loadMigration('002_external_id.sql');
+      this.db.exec(sql);
+    }
+    this._setMeta('schema_version', String(SCHEMA_VERSION));
   }
 
   async _loadMigration(filename) {
