@@ -11,6 +11,7 @@ const messageEpisodeMap = new Map();
 
 let currentChatId = null;
 let isInitialized = false;
+let dashboardRefreshTimer = null;
 
 // --- SillyTavern Extension API ---
 
@@ -22,23 +23,18 @@ async function initExtension() {
     return;
   }
 
+  // Render settings panel into ST extension area
+  await mountDashboard(context);
+
   const chatId = getChatId(context);
-  if (!chatId) return;
+  if (chatId) {
+    currentChatId = chatId;
 
-  currentChatId = chatId;
-
-  // LLM callback for consolidation summaries (optional)
-  const llmCallback = async (text) => {
-    if (typeof context.generateQuietPrompt === 'function') {
-      return context.generateQuietPrompt(
-        `Fasse die folgenden Ereignisse in 1-2 Sätzen zusammen. Behalte die Sprache bei:\n\n${text}`
-      );
-    }
-    return null;
-  };
-
-  await neuro.initialize(chatId, {}, llmCallback);
-  isInitialized = true;
+    const llmCallback = createLlmCallback(context);
+    await neuro.initialize(chatId, {}, llmCallback);
+    isInitialized = true;
+    refreshDashboard();
+  }
 
   // Register event listeners
   if (context.eventSource) {
@@ -50,11 +46,21 @@ async function initExtension() {
 
   // Register prompt injection hook
   if (typeof context.setExtensionPrompt === 'function') {
-    // This will be called each time before prompt assembly
     registerPromptHook(context);
   }
 
-  console.log('[NeuroCore] Extension initialized for chat:', chatId);
+  console.log('[NeuroCore] Extension initialized');
+}
+
+function createLlmCallback(context) {
+  return async (text) => {
+    if (typeof context.generateQuietPrompt === 'function') {
+      return context.generateQuietPrompt(
+        `Fasse die folgenden Ereignisse in 1-2 Sätzen zusammen. Behalte die Sprache bei:\n\n${text}`
+      );
+    }
+    return null;
+  };
 }
 
 function getChatId(context) {
@@ -63,6 +69,267 @@ function getChatId(context) {
     return `char-${context.characters[context.characterIndex]?.avatar || 'unknown'}`;
   }
   return null;
+}
+
+// --- Dashboard UI ---
+
+async function mountDashboard(context) {
+  try {
+    const settingsHtml = await context.renderExtensionTemplateAsync(
+      'third-party/neurocore', 'settings', {}, true, true
+    );
+    $('#extensions_settings2').append(settingsHtml);
+    bindDashboardEvents();
+  } catch (err) {
+    console.error('[NeuroCore] Failed to mount dashboard:', err);
+  }
+}
+
+function bindDashboardEvents() {
+  // Tab switching
+  $(document).on('click', '.neurocore-tab', function () {
+    const tabId = $(this).data('tab');
+    $('.neurocore-tab').removeClass('active');
+    $(this).addClass('active');
+    $('.neurocore-tab-content').removeClass('active');
+    $(`#neurocore-tab-${tabId}`).addClass('active');
+
+    if (tabId === 'graph') renderGraph();
+    if (tabId === 'memories') renderMemories();
+    if (tabId === 'patterns') renderPatterns();
+  });
+
+  // Action buttons
+  $(document).on('click', '#neurocore-export', onExport);
+  $(document).on('click', '#neurocore-import', onImport);
+  $(document).on('click', '#neurocore-consolidate', onConsolidate);
+  $(document).on('click', '#neurocore-refresh', refreshDashboard);
+
+  // Settings changes
+  $(document).on('change', '#neurocore-s-slots', function () {
+    neuro.settings.maxSlots = parseInt($(this).val()) || 8;
+  });
+  $(document).on('change', '#neurocore-s-budget', function () {
+    neuro.settings.tokenBudgetPercent = parseInt($(this).val()) || 15;
+  });
+  $(document).on('change', '#neurocore-s-interval', function () {
+    neuro.settings.consolidationInterval = parseInt($(this).val()) || 10;
+  });
+}
+
+function refreshDashboard() {
+  if (!neuro.db) return;
+  const status = neuro.getStatus();
+  if (!status) return;
+
+  $('#neurocore-msg-count').text(status.messageCount);
+  $('#neurocore-ep-count').text(status.hippocampus.episodes);
+  $('#neurocore-node-count').text(status.temporalLobe.nodes);
+  $('#neurocore-db-size').text(Math.round(status.dbSizeBytes / 1024) + ' KB');
+
+  // Region indicators
+  const regions = [
+    { name: 'Hippocampus', active: status.hippocampus.episodes > 0 },
+    { name: 'Amygdala', active: true },
+    { name: 'Temporal', active: status.temporalLobe.nodes > 0 },
+    { name: 'Cerebellum', active: status.cerebellum.patterns > 0 },
+    { name: 'Basalganglien', active: status.basalGanglia.habits > 0 },
+    { name: 'PFC', active: status.messageCount > 0 },
+  ];
+  const dots = regions.map(r =>
+    `<span class="neurocore-region">
+      <span class="dot ${r.active ? 'dot-active' : 'dot-inactive'}"></span>
+      ${r.name}
+    </span>`
+  ).join('');
+  $('#neurocore-regions').html(dots);
+
+  // Update settings inputs
+  $('#neurocore-s-slots').val(neuro.settings.maxSlots);
+  $('#neurocore-s-budget').val(neuro.settings.tokenBudgetPercent);
+  $('#neurocore-s-interval').val(neuro.settings.consolidationInterval);
+
+  // Render active tab
+  const activeTab = $('.neurocore-tab.active').data('tab') || 'memories';
+  if (activeTab === 'memories') renderMemories();
+  if (activeTab === 'patterns') renderPatterns();
+  if (activeTab === 'graph') renderGraph();
+}
+
+function renderMemories() {
+  if (!neuro.db) return;
+  const episodes = neuro.db.all('SELECT * FROM episodes ORDER BY timestamp DESC LIMIT 50');
+  const container = $('#neurocore-memory-list');
+
+  if (episodes.length === 0) {
+    container.html('<p class="neurocore-placeholder">Noch keine Erinnerungen.</p>');
+    return;
+  }
+
+  const items = episodes.map(ep => {
+    const valenceClass = ep.emotional_valence > 0.6 ? 'high-valence' :
+                         ep.emotional_valence > 0.3 ? 'medium-valence' : 'low-valence';
+    const content = ep.content.length > 120 ? ep.content.slice(0, 120) + '...' : ep.content;
+    const time = new Date(ep.timestamp).toLocaleTimeString('de-DE');
+    return `
+      <div class="neurocore-memory-item ${valenceClass}">
+        <div class="memory-content">${escapeHtml(content)}</div>
+        <div class="memory-meta">
+          Valenz: ${(ep.emotional_valence * 100).toFixed(0)}% |
+          Abrufe: ${ep.retrieval_count} |
+          ${time}${ep.consolidated ? ' | konsolidiert' : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+  container.html(items);
+}
+
+function renderPatterns() {
+  if (!neuro.db) return;
+  const patterns = neuro.db.all('SELECT * FROM procedural_patterns ORDER BY strength DESC LIMIT 20');
+  const habits = neuro.db.all('SELECT * FROM habits ORDER BY strength DESC LIMIT 20');
+  const container = $('#neurocore-patterns-list');
+
+  let html = '';
+
+  if (patterns.length > 0) {
+    html += '<h4 style="margin: 4px 0; font-size: 0.9em;">Verhaltensmuster</h4>';
+    for (const p of patterns) {
+      html += `<div class="neurocore-memory-item">
+        <div class="memory-content">${escapeHtml(p.trigger_desc)} → ${escapeHtml(p.response)}</div>
+        <div class="memory-meta">Stärke: ${(p.strength * 100).toFixed(0)}% | Aktivierungen: ${p.activation_count}</div>
+      </div>`;
+    }
+  }
+
+  if (habits.length > 0) {
+    html += '<h4 style="margin: 8px 0 4px; font-size: 0.9em;">Gewohnheiten</h4>';
+    for (const h of habits) {
+      html += `<div class="neurocore-memory-item">
+        <div class="memory-content">${escapeHtml(h.context)} → ${escapeHtml(h.behavior)}</div>
+        <div class="memory-meta">Stärke: ${(h.strength * 100).toFixed(0)}% | Belohnung: ${(h.average_reward * 100).toFixed(0)}%</div>
+      </div>`;
+    }
+  }
+
+  container.html(html || '<p class="neurocore-placeholder">Noch keine Muster erkannt.</p>');
+}
+
+function renderGraph() {
+  if (!neuro.db || !neuro.temporalLobe) return;
+  const canvas = document.getElementById('neurocore-graph-canvas');
+  if (!canvas) return;
+
+  const { nodes, edges } = neuro.temporalLobe.getAllNodesAndEdges();
+  if (nodes.length === 0) return;
+
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width = canvas.parentElement?.offsetWidth || 400;
+  const h = canvas.height = 300;
+  ctx.clearRect(0, 0, w, h);
+
+  // Circular layout
+  const positions = new Map();
+  const cx = w / 2;
+  const cy = h / 2;
+  const radius = Math.min(w, h) * 0.35;
+
+  nodes.forEach((node, i) => {
+    const angle = (2 * Math.PI * i) / nodes.length;
+    positions.set(node.id, {
+      x: cx + radius * Math.cos(angle),
+      y: cy + radius * Math.sin(angle),
+    });
+  });
+
+  // Draw edges
+  ctx.strokeStyle = 'rgba(120, 120, 200, 0.4)';
+  ctx.lineWidth = 1;
+  for (const edge of edges) {
+    const from = positions.get(edge.source_id);
+    const to = positions.get(edge.target_id);
+    if (from && to) {
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.stroke();
+    }
+  }
+
+  // Draw nodes
+  const typeColors = {
+    character: '#4caf50', item: '#ff9800', location: '#2196f3',
+    event: '#e53935', concept: '#9c27b0',
+  };
+
+  for (const node of nodes) {
+    const pos = positions.get(node.id);
+    if (!pos) continue;
+    const color = typeColors[node.type] || '#888';
+    const r = 6 + (node.confidence * 8);
+
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, r, 0, 2 * Math.PI);
+    ctx.fillStyle = color;
+    ctx.fill();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(node.label, pos.x, pos.y - r - 4);
+  }
+}
+
+// --- Action handlers ---
+
+async function onExport() {
+  try {
+    const { JsonExporter } = await import('./core/storage/JsonExporter.js');
+    const exporter = new JsonExporter(neuro.db);
+    const data = exporter.exportAll();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `neurocore-brain-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error('[NeuroCore] Export failed:', err);
+  }
+}
+
+async function onImport() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.addEventListener('change', async (e) => {
+    try {
+      const file = e.target.files[0];
+      if (!file) return;
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const { JsonExporter } = await import('./core/storage/JsonExporter.js');
+      new JsonExporter(neuro.db).importAll(data);
+      await neuro.db.save();
+      refreshDashboard();
+    } catch (err) {
+      console.error('[NeuroCore] Import failed:', err);
+    }
+  });
+  input.click();
+}
+
+async function onConsolidate() {
+  try {
+    const msgCount = neuro.db.getMessageCount();
+    await neuro.consolidation.runFullCycle(msgCount);
+    await neuro.db.save();
+    refreshDashboard();
+  } catch (err) {
+    console.error('[NeuroCore] Consolidation failed:', err);
+  }
 }
 
 // --- Event Handlers ---
@@ -82,6 +349,7 @@ async function onMessageReceived(messageIndex) {
 
     const episodeId = await neuro.processMessage(text, sender, messageIndex);
     messageEpisodeMap.set(messageIndex, episodeId);
+    refreshDashboard();
   } catch (err) {
     console.error('[NeuroCore] Error processing message:', err);
   }
@@ -96,16 +364,10 @@ async function onChatChanged() {
     currentChatId = newChatId;
     messageEpisodeMap.clear();
 
-    const llmCallback = async (text) => {
-      if (typeof context.generateQuietPrompt === 'function') {
-        return context.generateQuietPrompt(
-          `Fasse die folgenden Ereignisse in 1-2 Sätzen zusammen. Behalte die Sprache bei:\n\n${text}`
-        );
-      }
-      return null;
-    };
-
+    const llmCallback = createLlmCallback(context);
     await neuro.switchChat(newChatId, llmCallback);
+    isInitialized = true;
+    refreshDashboard();
     console.log('[NeuroCore] Switched to chat:', newChatId);
   } catch (err) {
     console.error('[NeuroCore] Error switching chat:', err);
@@ -118,6 +380,7 @@ function onMessageDeleted(messageIndex) {
   if (episodeId) {
     neuro.handleMessageDeleted(episodeId);
     messageEpisodeMap.delete(messageIndex);
+    refreshDashboard();
   }
 }
 
@@ -138,7 +401,6 @@ async function onMessageUpdated(messageIndex) {
 }
 
 function registerPromptHook(context) {
-  // Use GENERATE_BEFORE_COMBINE to inject memory context
   if (context.eventSource) {
     context.eventSource.on('generate_before_combine', () => {
       const injection = neuro.getPromptInjection(context.maxContext || 4096);
@@ -149,25 +411,19 @@ function registerPromptHook(context) {
   }
 }
 
-// --- Dashboard API (exposed for UI) ---
-
-export function getNeuroController() {
-  return neuro;
-}
-
-export function getMessageEpisodeMap() {
-  return messageEpisodeMap;
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 // --- Extension lifecycle ---
 
-// SillyTavern calls jQuery(async () => {}) for extension init
+export function getNeuroController() { return neuro; }
+export function getMessageEpisodeMap() { return messageEpisodeMap; }
+
 if (typeof jQuery !== 'undefined') {
   jQuery(async () => {
-    await initExtension();
-  });
-} else if (typeof window !== 'undefined') {
-  window.addEventListener('DOMContentLoaded', async () => {
     await initExtension();
   });
 }

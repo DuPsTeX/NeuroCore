@@ -1,0 +1,90 @@
+<div class="neurocore-settings-header">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>NeuroCore Brain</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <!-- Status bar -->
+            <div id="neurocore-status" class="neurocore-status">
+                <div class="neurocore-stat">
+                    <div class="stat-value" id="neurocore-msg-count">0</div>
+                    <div class="stat-label">Nachrichten</div>
+                </div>
+                <div class="neurocore-stat">
+                    <div class="stat-value" id="neurocore-ep-count">0</div>
+                    <div class="stat-label">Episoden</div>
+                </div>
+                <div class="neurocore-stat">
+                    <div class="stat-value" id="neurocore-node-count">0</div>
+                    <div class="stat-label">Wissen</div>
+                </div>
+                <div class="neurocore-stat">
+                    <div class="stat-value" id="neurocore-db-size">0 KB</div>
+                    <div class="stat-label">DB Größe</div>
+                </div>
+            </div>
+
+            <!-- Region indicators -->
+            <div id="neurocore-regions" class="neurocore-regions"></div>
+
+            <!-- Tabs -->
+            <div class="neurocore-tabs">
+                <button class="neurocore-tab active" data-tab="memories">Erinnerungen</button>
+                <button class="neurocore-tab" data-tab="graph">Wissensgraph</button>
+                <button class="neurocore-tab" data-tab="patterns">Muster</button>
+                <button class="neurocore-tab" data-tab="config">Einstellungen</button>
+            </div>
+
+            <!-- Tab contents -->
+            <div class="neurocore-tab-content active" id="neurocore-tab-memories">
+                <div id="neurocore-memory-list" class="neurocore-memory-list-container">
+                    <p class="neurocore-placeholder">Noch keine Erinnerungen.</p>
+                </div>
+            </div>
+
+            <div class="neurocore-tab-content" id="neurocore-tab-graph">
+                <canvas id="neurocore-graph-canvas" width="400" height="300"></canvas>
+            </div>
+
+            <div class="neurocore-tab-content" id="neurocore-tab-patterns">
+                <div id="neurocore-patterns-list">
+                    <p class="neurocore-placeholder">Noch keine Muster erkannt.</p>
+                </div>
+            </div>
+
+            <div class="neurocore-tab-content" id="neurocore-tab-config">
+                <div class="neurocore-settings">
+                    <label>
+                        <span>Max Slots (Working Memory)</span>
+                        <input type="number" id="neurocore-s-slots" value="8" min="1" max="20" class="text_pole">
+                    </label>
+                    <label>
+                        <span>Token Budget (%)</span>
+                        <input type="number" id="neurocore-s-budget" value="15" min="1" max="50" class="text_pole">
+                    </label>
+                    <label>
+                        <span>Konsolidierungs-Intervall</span>
+                        <input type="number" id="neurocore-s-interval" value="10" min="5" max="100" class="text_pole">
+                    </label>
+                </div>
+            </div>
+
+            <!-- Action buttons -->
+            <div class="neurocore-actions">
+                <button class="menu_button" id="neurocore-export">
+                    <i class="fa-solid fa-download"></i> Export
+                </button>
+                <button class="menu_button" id="neurocore-import">
+                    <i class="fa-solid fa-upload"></i> Import
+                </button>
+                <button class="menu_button" id="neurocore-consolidate">
+                    <i class="fa-solid fa-brain"></i> Konsolidieren
+                </button>
+                <button class="menu_button" id="neurocore-refresh">
+                    <i class="fa-solid fa-refresh"></i> Aktualisieren
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
