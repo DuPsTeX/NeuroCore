@@ -36,12 +36,22 @@ async function initExtension() {
     refreshDashboard();
   }
 
-  // Register event listeners
-  if (context.eventSource) {
-    context.eventSource.on('message_received', onMessageReceived);
-    context.eventSource.on('chatLoaded', onChatChanged);
-    context.eventSource.on('messageDeleted', onMessageDeleted);
-    context.eventSource.on('messageUpdated', onMessageUpdated);
+  // Register event listeners using ST's event type constants
+  const eventSource = context.eventSource;
+  const eventTypes = context.eventTypes || context.event_types;
+  if (eventSource && eventTypes) {
+    eventSource.on(eventTypes.MESSAGE_RECEIVED, onMessageReceived);
+    eventSource.on(eventTypes.CHAT_CHANGED, onChatChanged);
+    eventSource.on(eventTypes.MESSAGE_DELETED, onMessageDeleted);
+    eventSource.on(eventTypes.MESSAGE_UPDATED, onMessageUpdated);
+    console.log('[NeuroCore] Event listeners registered:', {
+      MESSAGE_RECEIVED: eventTypes.MESSAGE_RECEIVED,
+      CHAT_CHANGED: eventTypes.CHAT_CHANGED,
+      MESSAGE_DELETED: eventTypes.MESSAGE_DELETED,
+      MESSAGE_UPDATED: eventTypes.MESSAGE_UPDATED,
+    });
+  } else {
+    console.error('[NeuroCore] eventSource or eventTypes not available on context!');
   }
 
   // Register prompt injection hook
@@ -49,8 +59,15 @@ async function initExtension() {
     registerPromptHook(context);
   }
 
-  console.log('[NeuroCore] Extension initialized');
+  console.log('[NeuroCore] Extension initialized for chat:', chatId || '(no chat open)');
 }
+
+// Log uncaught errors in the extension
+window.addEventListener?.('error', (e) => {
+  if (e.filename?.includes('neurocore')) {
+    console.error('[NeuroCore] Uncaught error:', e.message, e.filename, e.lineno);
+  }
+});
 
 function createLlmCallback(context) {
   return async (text) => {
@@ -75,11 +92,16 @@ function getChatId(context) {
 
 async function mountDashboard(context) {
   try {
+    if (typeof context.renderExtensionTemplateAsync !== 'function') {
+      console.error('[NeuroCore] renderExtensionTemplateAsync not available on context');
+      return;
+    }
     const settingsHtml = await context.renderExtensionTemplateAsync(
       'third-party/neurocore', 'settings', {}, true, true
     );
     $('#extensions_settings2').append(settingsHtml);
     bindDashboardEvents();
+    console.log('[NeuroCore] Dashboard mounted successfully');
   } catch (err) {
     console.error('[NeuroCore] Failed to mount dashboard:', err);
   }
@@ -401,13 +423,16 @@ async function onMessageUpdated(messageIndex) {
 }
 
 function registerPromptHook(context) {
-  if (context.eventSource) {
-    context.eventSource.on('generate_before_combine', () => {
+  const eventSource = context.eventSource;
+  const eventTypes = context.eventTypes || context.event_types;
+  if (eventSource && eventTypes) {
+    eventSource.on(eventTypes.GENERATE_BEFORE_COMBINE_PROMPTS, () => {
       const injection = neuro.getPromptInjection(context.maxContext || 4096);
       if (injection && injection.trim()) {
         context.setExtensionPrompt(MODULE_NAME, injection, 1, 0);
       }
     });
+    console.log('[NeuroCore] Prompt hook registered on:', eventTypes.GENERATE_BEFORE_COMBINE_PROMPTS);
   }
 }
 
