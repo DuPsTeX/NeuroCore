@@ -134,6 +134,8 @@ function bindDashboardEvents() {
   $(document).on('click', '#neurocore-import', onImport);
   $(document).on('click', '#neurocore-consolidate', onConsolidate);
   $(document).on('click', '#neurocore-refresh', refreshDashboard);
+  $(document).on('click', '#neurocore-show-injection', onShowInjection);
+  $(document).on('click', '#neurocore-popup-close', () => $('#neurocore-injection-popup').hide());
 
   // Settings changes
   $(document).on('change', '#neurocore-s-slots', function () {
@@ -420,6 +422,31 @@ async function onConsolidate() {
   } catch (err) {
     console.error('[NeuroCore] Consolidation failed:', err);
   }
+}
+
+function onShowInjection() {
+  const injection = neuro.lastPromptInjection || '';
+  const container = $('#neurocore-injection-content');
+  const meta = $('#neurocore-popup-meta');
+  const popup = $('#neurocore-injection-popup');
+
+  if (!injection.trim()) {
+    container.text('(Noch kein Memory-Prompt generiert. Sende zuerst eine Nachricht.)');
+    meta.html('');
+  } else {
+    container.text(injection);
+    const tokens = neuro.pfc.estimateTokens(injection);
+    const context = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+    const maxCtx = context?.maxContext || 4096;
+    const budget = Math.floor(maxCtx * (neuro.settings.tokenBudgetPercent / 100));
+    meta.html(
+      `<span>~${tokens} Tokens</span>` +
+      `<span>Budget: ${budget} / ${maxCtx} (${neuro.settings.tokenBudgetPercent}%)</span>` +
+      `<span>Slots: ${neuro.settings.maxSlots}</span>`
+    );
+  }
+
+  popup.toggle();
 }
 
 // --- Event Handlers ---

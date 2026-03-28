@@ -206,3 +206,55 @@
   padding: 2px 6px;
   border-radius: 3px;
 }
+
+/* Prompt Injection Popup */
+.neurocore-popup {
+  margin-top: 10px;
+  background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.5));
+  border: 1px solid var(--SmartThemeBorderColor, #555);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.neurocore-popup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(123, 104, 238, 0.15);
+  border-bottom: 1px solid var(--SmartThemeBorderColor, #555);
+  font-size: 0.85em;
+  font-weight: bold;
+  color: var(--SmartThemeBodyColor, #ddd);
+}
+
+.neurocore-popup-header .menu_button {
+  padding: 2px 8px;
+  min-width: unset;
+}
+
+.neurocore-popup-meta {
+  display: flex;
+  gap: 12px;
+  padding: 6px 12px;
+  font-size: 0.75em;
+  color: var(--SmartThemeBodyColor, #aaa);
+  border-bottom: 1px solid var(--SmartThemeBorderColor, #444);
+}
+
+.neurocore-popup-meta:empty {
+  display: none;
+}
+
+.neurocore-popup-content {
+  padding: 10px 12px;
+  margin: 0;
+  max-height: 500px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-size: 0.8em;
+  line-height: 1.5;
+  color: var(--SmartThemeBodyColor, #ddd);
+  font-family: monospace;
+}

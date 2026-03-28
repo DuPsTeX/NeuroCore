@@ -72,6 +72,9 @@
 
             <!-- Action buttons -->
             <div class="neurocore-actions">
+                <button class="menu_button" id="neurocore-show-injection">
+                    <i class="fa-solid fa-eye"></i> Prompt anzeigen
+                </button>
                 <button class="menu_button" id="neurocore-export">
                     <i class="fa-solid fa-download"></i> Export
                 </button>
@@ -84,6 +87,18 @@
                 <button class="menu_button" id="neurocore-refresh">
                     <i class="fa-solid fa-refresh"></i> Aktualisieren
                 </button>
+            </div>
+
+            <!-- Prompt Injection Popup -->
+            <div id="neurocore-injection-popup" class="neurocore-popup" style="display: none;">
+                <div class="neurocore-popup-header">
+                    <span>Aktueller Memory-Prompt an die KI</span>
+                    <button class="menu_button" id="neurocore-popup-close">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+                <div class="neurocore-popup-meta" id="neurocore-popup-meta"></div>
+                <pre id="neurocore-injection-content" class="neurocore-popup-content"></pre>
             </div>
         </div>
     </div>
