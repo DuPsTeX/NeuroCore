@@ -161,6 +161,8 @@ export class NeuroController {
   getPromptInjection(maxContextTokens = 4096) {
     const tokenBudget = Math.floor(maxContextTokens * (this.settings.tokenBudgetPercent / 100));
     const estimated = this.pfc.estimateTokens(this.lastPromptInjection);
+    console.log('[NeuroCore] getPromptInjection — lastInjection length:', this.lastPromptInjection.length,
+      'tokens:', estimated, 'budget:', tokenBudget);
     if (estimated > tokenBudget) {
       const ratio = tokenBudget / estimated;
       const chars = Math.floor(this.lastPromptInjection.length * ratio);

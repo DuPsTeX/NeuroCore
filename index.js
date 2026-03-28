@@ -42,6 +42,11 @@ async function initExtension() {
       console.log('[NeuroCore] Initial import: %d messages', imported);
     }
 
+    // Set initial extension prompt so it's ready for the first generate
+    if (typeof context.setExtensionPrompt === 'function') {
+      updateExtensionPrompt();
+    }
+
     refreshDashboard();
   }
 
@@ -462,6 +467,7 @@ async function onConsolidate() {
     await neuro.consolidation.runFullCycle(msgCount);
     await neuro.db.save();
     console.log('[NeuroCore] Consolidation complete');
+    updateExtensionPrompt();
     refreshDashboard();
   } catch (err) {
     console.error('[NeuroCore] Consolidation failed:', err);
@@ -514,6 +520,7 @@ async function onMessageReceived(messageIndex) {
     const episodeId = await neuro.processMessage(text, sender, messageIndex, externalId);
     console.log('[NeuroCore] Stored episode:', episodeId);
     messageEpisodeMap.set(messageIndex, episodeId);
+    updateExtensionPrompt();
     refreshDashboard();
   } catch (err) {
     console.error('[NeuroCore] Error processing message:', err);
@@ -539,6 +546,7 @@ async function onChatChanged() {
       await neuro.db.save();
     }
 
+    updateExtensionPrompt();
     refreshDashboard();
     console.log('[NeuroCore] Switched to chat:', newChatId, '- imported', imported, 'messages');
   } catch (err) {
@@ -621,15 +629,61 @@ async function onMessageUpdated(messageIndex) {
   }
 }
 
+function updateExtensionPrompt() {
+  // Push current injection into ST's extension prompt system
+  try {
+    const ctx = SillyTavern.getContext();
+    const maxCtx = ctx.maxContext || 4096;
+    const injection = neuro.getPromptInjection(maxCtx);
+    if (injection && injection.trim()) {
+      ctx.setExtensionPrompt(MODULE_NAME, injection, 1, 0);
+      console.log('[NeuroCore] Extension prompt updated, length:', injection.length);
+    } else {
+      // Clear any previous injection if nothing to inject
+      ctx.setExtensionPrompt(MODULE_NAME, '', 1, 0);
+      console.log('[NeuroCore] Extension prompt cleared (empty injection)');
+    }
+  } catch (err) {
+    console.error('[NeuroCore] Failed to update extension prompt:', err);
+  }
+}
+
 function registerPromptHook(context) {
   const eventSource = context.eventSource;
   const eventTypes = context.eventTypes || context.event_types;
   if (eventSource && eventTypes) {
-    eventSource.on(eventTypes.GENERATE_BEFORE_COMBINE_PROMPTS, () => {
-      const injection = neuro.getPromptInjection(context.maxContext || 4096);
-      if (injection && injection.trim()) {
-        context.setExtensionPrompt(MODULE_NAME, injection, 1, 0);
+    // Listen for the generate event to ensure prompt is fresh
+    eventSource.on(eventTypes.GENERATE_BEFORE_COMBINE_PROMPTS, async () => {
+      console.log('[NeuroCore] GENERATE_BEFORE_COMBINE_PROMPTS fired');
+
+      // Process the latest user message if not yet processed
+      try {
+        const ctx = SillyTavern.getContext();
+        const chat = ctx.chat;
+        if (chat && chat.length > 0) {
+          // Find the last user message
+          for (let i = chat.length - 1; i >= 0; i--) {
+            const msg = chat[i];
+            if (!msg.is_user) continue;
+            const text = msg.mes || '';
+            if (!text.trim()) break;
+
+            const externalId = getMessageExternalId(msg, i);
+            // Only process if not already in DB
+            if (!neuro.hippocampus.hasEpisodeByExternalId(externalId)) {
+              console.log('[NeuroCore] Processing user message before generate, index:', i);
+              const episodeId = await neuro.processMessage(text, 'user', i, externalId);
+              messageEpisodeMap.set(i, episodeId);
+            }
+            break; // Only process the last user message
+          }
+        }
+      } catch (err) {
+        console.warn('[NeuroCore] Pre-generate message processing failed:', err);
       }
+
+      // Now update the extension prompt with latest injection
+      updateExtensionPrompt();
     });
     console.log('[NeuroCore] Prompt hook registered on:', eventTypes.GENERATE_BEFORE_COMBINE_PROMPTS);
   }
