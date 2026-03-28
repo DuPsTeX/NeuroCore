@@ -2,6 +2,7 @@
 // Hooks into ST events and wires them to NeuroController
 
 import { NeuroController } from './core/NeuroController.js';
+import { initExplorer, openExplorer } from './ui/BrainExplorer.js';
 
 const MODULE_NAME = 'neurocore';
 const neuro = new NeuroController();
@@ -108,8 +109,16 @@ async function mountDashboard(context) {
       'third-party/neurocore', 'settings', {}, true, true
     );
     $('#extensions_settings2').append(settingsHtml);
+
+    // Mount explorer overlay to body (needs to be outside the panel for full-screen)
+    const explorerHtml = await context.renderExtensionTemplateAsync(
+      'third-party/neurocore', 'explorer', {}, true, true
+    );
+    $('body').append(explorerHtml);
+
     bindDashboardEvents();
-    console.log('[NeuroCore] Dashboard mounted successfully');
+    initExplorer(neuro);
+    console.log('[NeuroCore] Dashboard + Explorer mounted successfully');
   } catch (err) {
     console.error('[NeuroCore] Failed to mount dashboard:', err);
   }
@@ -136,6 +145,7 @@ function bindDashboardEvents() {
   $(document).on('click', '#neurocore-refresh', refreshDashboard);
   $(document).on('click', '#neurocore-show-injection', onShowInjection);
   $(document).on('click', '#neurocore-popup-close', () => $('#neurocore-injection-popup').hide());
+  $(document).on('click', '#neurocore-open-explorer', openExplorer);
 
   // Settings changes
   $(document).on('change', '#neurocore-s-slots', function () {

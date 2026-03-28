@@ -1,0 +1,49 @@
+<div id="neurocore-explorer-overlay" class="neurocore-explorer-overlay" style="display: none;">
+    <div class="neurocore-explorer">
+        <!-- Header -->
+        <div class="explorer-header">
+            <h2><i class="fa-solid fa-brain"></i> NeuroCore Brain Explorer</h2>
+            <button class="menu_button" id="neurocore-explorer-close">
+                <i class="fa-solid fa-xmark"></i> Schliessen
+            </button>
+        </div>
+
+        <!-- Search & Controls -->
+        <div class="explorer-controls">
+            <div class="explorer-search">
+                <i class="fa-solid fa-search"></i>
+                <input type="text" id="explorer-search-input" placeholder="Suche im Gehirn..." class="text_pole">
+            </div>
+            <div class="explorer-filters">
+                <select id="explorer-category" class="text_pole">
+                    <option value="all">Alle Kategorien</option>
+                    <option value="episodes">Episoden (Rohdaten)</option>
+                    <option value="consolidated">Konsolidiert (Langzeit)</option>
+                    <option value="semantic">Wissensgraph</option>
+                    <option value="patterns">Verhaltensmuster</option>
+                    <option value="habits">Gewohnheiten</option>
+                    <option value="emotions">Emotionale Tags</option>
+                </select>
+                <select id="explorer-sort" class="text_pole">
+                    <option value="newest">Neueste zuerst</option>
+                    <option value="oldest">Aelteste zuerst</option>
+                    <option value="valence-high">Hoechste Valenz</option>
+                    <option value="valence-low">Niedrigste Valenz</option>
+                    <option value="most-retrieved">Am meisten abgerufen</option>
+                    <option value="strongest">Staerkste zuerst</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Stats bar -->
+        <div class="explorer-stats" id="explorer-stats"></div>
+
+        <!-- Results -->
+        <div class="explorer-results" id="explorer-results">
+            <p class="neurocore-placeholder">Waehle eine Kategorie und klicke Suchen...</p>
+        </div>
+
+        <!-- Pagination -->
+        <div class="explorer-pagination" id="explorer-pagination"></div>
+    </div>
+</div>
