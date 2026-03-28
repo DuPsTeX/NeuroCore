@@ -103,8 +103,8 @@ export class Consolidation {
     // 1. Create semantic edges between co-occurring proper nouns
     this._createCoOccurrenceEdges(recent);
 
-    // 2. Strengthen existing procedural patterns that match recurring keywords
-    this._extractPatterns(recent);
+    // 2. Strengthen existing + discover new procedural patterns
+    await this._extractPatterns(recent);
 
     // 3. Decay unrewarded habits
     this._updateHabitStrengths(msgCount);
@@ -112,8 +112,10 @@ export class Consolidation {
     this._log(msgCount, 'rem_sleep');
   }
 
-  _extractPatterns(episodes) {
+  async _extractPatterns(episodes) {
     if (!this.cerebellum || episodes.length < 2) return;
+
+    // 1. Find recurring keywords
     const keywordCounts = new Map();
     for (const ep of episodes) {
       const kws = extractKeywords(ep.content);
@@ -122,11 +124,87 @@ export class Consolidation {
       }
     }
     const recurring = [...keywordCounts.entries()].filter(([, c]) => c >= 3).map(([w]) => w);
+
+    // 2. Strengthen existing patterns that match
     if (recurring.length > 0) {
       const existing = this.cerebellum.matchPatterns(recurring);
       for (const p of existing) {
         this.cerebellum.activatePattern(p.id);
       }
+    }
+
+    // 3. Try to discover NEW patterns via LLM
+    if (this.generateSummary && episodes.length >= 3) {
+      await this._discoverPatternsViaLLM(episodes);
+    }
+  }
+
+  async _discoverPatternsViaLLM(episodes) {
+    try {
+      // Build conversation excerpt for the LLM
+      const excerpt = episodes.slice(0, 20).map(ep => {
+        const sender = JSON.parse(ep.participants || '["?"]')[0];
+        const text = ep.content.length > 300 ? ep.content.slice(0, 300) + '...' : ep.content;
+        return `[${sender}]: ${text}`;
+      }).join('\n\n');
+
+      const prompt = `Analysiere diesen RP-Chatverlauf und finde wiederkehrende Verhaltensmuster.
+
+Ein Muster besteht aus:
+- trigger: Was löst das Verhalten aus? (kurze Beschreibung)
+- trigger_keywords: Schlüsselwörter die den Trigger erkennen (Array)
+- response: Wie reagiert der Charakter typischerweise? (kurze Beschreibung)
+
+Suche nach Mustern wie:
+- Wiederkehrende Reaktionen auf bestimmte Situationen
+- Typische Verhaltensweisen eines Charakters
+- Gesprächsmuster die sich wiederholen
+
+Antworte NUR mit einem JSON-Array. Maximal 3 Muster. Wenn keine erkennbar sind, antworte mit [].
+
+Format:
+[{"trigger": "...", "trigger_keywords": ["..."], "response": "..."}]
+
+Chatverlauf:
+${excerpt}`;
+
+      const result = await this.generateSummary(prompt);
+      if (!result) return;
+
+      // Parse JSON from LLM response
+      const jsonMatch = result.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) return;
+
+      let patterns;
+      try {
+        patterns = JSON.parse(jsonMatch[0]);
+      } catch {
+        console.warn('[NeuroCore] Failed to parse LLM pattern response');
+        return;
+      }
+
+      if (!Array.isArray(patterns)) return;
+
+      for (const p of patterns) {
+        if (!p.trigger || !p.response || !Array.isArray(p.trigger_keywords)) continue;
+        if (p.trigger_keywords.length === 0) continue;
+
+        // Check if a similar pattern already exists (keyword overlap > 50%)
+        const existing = this.cerebellum.matchPatterns(p.trigger_keywords);
+        const isDuplicate = existing.some(e => e.overlapScore > 0.5);
+
+        if (!isDuplicate) {
+          const id = this.cerebellum.storePattern({
+            trigger: p.trigger,
+            triggerKeywords: p.trigger_keywords,
+            response: p.response,
+            examples: episodes.slice(0, 3).map(e => e.content.slice(0, 100)),
+          });
+          console.log('[NeuroCore] New pattern discovered:', p.trigger, '->', p.response);
+        }
+      }
+    } catch (err) {
+      console.warn('[NeuroCore] Pattern discovery failed:', err.message);
     }
   }
 
