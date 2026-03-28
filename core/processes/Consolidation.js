@@ -106,8 +106,8 @@ export class Consolidation {
     // 2. Strengthen existing + discover new procedural patterns
     await this._extractPatterns(recent);
 
-    // 3. Decay unrewarded habits
-    this._updateHabitStrengths(msgCount);
+    // 3. Decay unrewarded habits + discover new ones
+    await this._updateHabitStrengths(recent);
 
     this._log(msgCount, 'rem_sleep');
   }
@@ -208,9 +208,100 @@ ${excerpt}`;
     }
   }
 
-  _updateHabitStrengths() {
+  async _updateHabitStrengths(episodes) {
     if (!this.basalGanglia) return;
     this.basalGanglia.decayUnrewardedHabits();
+
+    // Discover new habits via LLM
+    if (this.generateSummary && episodes && episodes.length >= 3) {
+      await this._discoverHabitsViaLLM(episodes);
+    }
+  }
+
+  async _discoverHabitsViaLLM(episodes) {
+    try {
+      // Separate user and character messages
+      const userMsgs = [];
+      const charMsgs = [];
+      for (const ep of episodes.slice(0, 20)) {
+        const sender = JSON.parse(ep.participants || '["?"]')[0];
+        const text = ep.content.length > 300 ? ep.content.slice(0, 300) + '...' : ep.content;
+        if (sender === 'user') {
+          userMsgs.push(text);
+        } else {
+          charMsgs.push(text);
+        }
+      }
+
+      const excerpt = episodes.slice(0, 20).map(ep => {
+        const sender = JSON.parse(ep.participants || '["?"]')[0];
+        const text = ep.content.length > 300 ? ep.content.slice(0, 300) + '...' : ep.content;
+        return `[${sender}]: ${text}`;
+      }).join('\n\n');
+
+      const prompt = `Analysiere diesen RP-Chatverlauf und finde Gewohnheiten der Charaktere.
+
+Eine Gewohnheit ist ein wiederkehrendes Verhalten in einem bestimmten Kontext:
+- context: In welcher Situation tritt das Verhalten auf? (z.B. "In der Taverne", "Bei Gefahr", "Beim Handeln")
+- behavior: Was tut der Charakter automatisch? (z.B. "bestellt immer Bier", "greift zur Waffe", "versucht zu feilschen")
+
+Suche nach:
+- Automatische Reaktionen die ohne Nachdenken passieren
+- Wiederkehrende Vorlieben oder Abneigungen
+- Typische Verhaltensweisen in bestimmten Orten oder Situationen
+- Soziale Gewohnheiten (wie der Charakter mit NPCs umgeht)
+
+Antworte NUR mit einem JSON-Array. Maximal 3 Gewohnheiten. Wenn keine erkennbar sind, antworte mit [].
+
+Format:
+[{"context": "...", "behavior": "..."}]
+
+Chatverlauf:
+${excerpt}`;
+
+      const result = await this.generateSummary(prompt);
+      if (!result) return;
+
+      const jsonMatch = result.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) return;
+
+      let habits;
+      try {
+        habits = JSON.parse(jsonMatch[0]);
+      } catch {
+        console.warn('[NeuroCore] Failed to parse LLM habit response');
+        return;
+      }
+
+      if (!Array.isArray(habits)) return;
+
+      // Check existing habits to avoid duplicates
+      const existingHabits = this.basalGanglia.getAllHabits();
+
+      for (const h of habits) {
+        if (!h.context || !h.behavior) continue;
+
+        // Simple duplicate check: same context+behavior substring
+        const isDuplicate = existingHabits.some(ex =>
+          ex.context.toLowerCase().includes(h.context.toLowerCase().slice(0, 20)) ||
+          ex.behavior.toLowerCase().includes(h.behavior.toLowerCase().slice(0, 20))
+        );
+
+        if (!isDuplicate) {
+          const id = this.basalGanglia.createHabit({
+            context: h.context,
+            behavior: h.behavior,
+          });
+          // Give initial reward based on how many episodes mention the context
+          if (id) {
+            this.basalGanglia.recordReward(id, 0.5);
+            console.log('[NeuroCore] New habit discovered:', h.context, '->', h.behavior);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[NeuroCore] Habit discovery failed:', err.message);
+    }
   }
 
   _clusterByKeywords(episodes) {
