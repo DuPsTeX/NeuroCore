@@ -410,6 +410,35 @@ async function importExistingChat() {
   return imported;
 }
 
+function syncDeletedMessages() {
+  // Find episodes in DB whose external_id no longer exists in the chat
+  const context = SillyTavern.getContext();
+  const chat = context.chat;
+  if (!chat) return 0;
+
+  // Build set of all current send_dates
+  const currentIds = new Set();
+  for (let i = 0; i < chat.length; i++) {
+    const id = getMessageExternalId(chat[i], i);
+    currentIds.add(id);
+  }
+
+  // Find episodes with external_id that's no longer in chat
+  const allEpisodes = neuro.db.all('SELECT id, external_id FROM episodes WHERE external_id IS NOT NULL');
+  let removed = 0;
+  for (const ep of allEpisodes) {
+    if (!currentIds.has(ep.external_id)) {
+      neuro.hippocampus.deleteEpisode(ep.id);
+      removed++;
+    }
+  }
+
+  if (removed > 0) {
+    console.log('[NeuroCore] Removed %d orphaned episodes (deleted messages)', removed);
+  }
+  return removed;
+}
+
 async function onConsolidate() {
   console.log('[NeuroCore] Consolidate button clicked, isInitialized:', isInitialized, 'db:', !!neuro.db);
   if (!neuro.db) {
@@ -417,12 +446,17 @@ async function onConsolidate() {
     return;
   }
   try {
-    // First import any existing chat messages that aren't in the DB yet
+    // 1. Remove episodes for deleted messages
+    const removed = syncDeletedMessages();
+
+    // 2. Import any new messages not yet in the DB
     const imported = await importExistingChat();
-    if (imported > 0) {
-      console.log('[NeuroCore] Imported %d messages before consolidation', imported);
+
+    if (removed > 0 || imported > 0) {
+      console.log('[NeuroCore] Sync: +%d imported, -%d removed', imported, removed);
     }
 
+    // 3. Run consolidation
     const msgCount = neuro.db.getMessageCount();
     console.log('[NeuroCore] Running consolidation, message count:', msgCount);
     await neuro.consolidation.runFullCycle(msgCount);
@@ -514,11 +548,28 @@ async function onChatChanged() {
 
 function onMessageDeleted(messageIndex) {
   if (!isInitialized) return;
-  const episodeId = messageEpisodeMap.get(messageIndex);
+  console.log('[NeuroCore] message_deleted fired, index:', messageIndex);
+
+  // Try via in-memory map first
+  let episodeId = messageEpisodeMap.get(messageIndex);
+
+  // Fallback: look up via external_id in DB (works after reload)
+  if (!episodeId) {
+    const context = SillyTavern.getContext();
+    const msg = context.chat?.[messageIndex];
+    if (msg) {
+      const externalId = getMessageExternalId(msg, messageIndex);
+      const ep = neuro.hippocampus.getEpisodeByExternalId(externalId);
+      if (ep) episodeId = ep.id;
+    }
+  }
+
   if (episodeId) {
     neuro.handleMessageDeleted(episodeId);
     messageEpisodeMap.delete(messageIndex);
+    neuro.db.save();
     refreshDashboard();
+    console.log('[NeuroCore] Deleted episode:', episodeId);
   }
 }
 
@@ -529,9 +580,41 @@ async function onMessageUpdated(messageIndex) {
     const msg = context.chat?.[messageIndex];
     if (!msg) return;
 
-    const episodeId = messageEpisodeMap.get(messageIndex);
+    console.log('[NeuroCore] message_updated fired, index:', messageIndex);
+    const newText = msg.mes || '';
+    const externalId = getMessageExternalId(msg, messageIndex);
+
+    // Try via in-memory map first
+    let episodeId = messageEpisodeMap.get(messageIndex);
+
+    // Fallback: look up via external_id in DB
+    if (!episodeId) {
+      const ep = neuro.hippocampus.getEpisodeByExternalId(externalId);
+      if (ep) episodeId = ep.id;
+    }
+
     if (episodeId) {
-      neuro.handleMessageEdited(episodeId, msg.mes || '');
+      // Update the episode content + keywords
+      neuro.hippocampus.updateEpisodeContent(episodeId, newText);
+      // Re-analyze emotions
+      const emotional = neuro.amygdala.analyze(newText);
+      neuro.db.run('UPDATE episodes SET emotional_valence = ? WHERE id = ?',
+        [emotional.valence, episodeId]);
+      // Clear old emotional tags and re-create
+      neuro.db.run('DELETE FROM emotional_tags WHERE episode_id = ?', [episodeId]);
+      neuro.amygdala.saveEmotionalTags(neuro.db, episodeId, emotional.emotions);
+
+      await neuro.db.save();
+      refreshDashboard();
+      console.log('[NeuroCore] Updated episode:', episodeId);
+    } else {
+      // Message was edited but we don't have it yet — import it
+      const sender = msg.is_user ? 'user' : (msg.name || 'character');
+      const epId = await neuro.processMessage(newText, sender, messageIndex, externalId);
+      messageEpisodeMap.set(messageIndex, epId);
+      await neuro.db.save();
+      refreshDashboard();
+      console.log('[NeuroCore] Imported edited message as new episode:', epId);
     }
   } catch (err) {
     console.error('[NeuroCore] Error updating message:', err);

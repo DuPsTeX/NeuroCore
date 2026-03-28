@@ -109,7 +109,24 @@ export class Hippocampus {
   }
 
   deleteEpisode(id) {
+    this.db.run('DELETE FROM episode_keywords WHERE episode_id = ?', [id]);
+    this.db.run('DELETE FROM emotional_tags WHERE episode_id = ?', [id]);
     this.db.run('DELETE FROM episodes WHERE id = ?', [id]);
+  }
+
+  deleteByExternalId(externalId) {
+    if (!externalId) return false;
+    const existing = this.db.get('SELECT id FROM episodes WHERE external_id = ?', [externalId]);
+    if (existing) {
+      this.deleteEpisode(existing.id);
+      return true;
+    }
+    return false;
+  }
+
+  getEpisodeByExternalId(externalId) {
+    if (!externalId) return null;
+    return this.db.get('SELECT * FROM episodes WHERE external_id = ?', [externalId]);
   }
 
   getEpisodeById(id) {
