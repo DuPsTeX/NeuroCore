@@ -102,6 +102,37 @@ function createLlmCallback(context) {
 }
 
 /**
+ * Map chat_completion_source → settings property name for the model.
+ * Mirrors SillyTavern's getChatCompletionModel() from openai.js.
+ */
+const SOURCE_MODEL_MAP = {
+  openai: 'openai_model',
+  claude: 'claude_model',
+  openrouter: 'openrouter_model',
+  deepseek: 'deepseek_model',
+  mistralai: 'mistralai_model',
+  custom: 'custom_model',
+  cohere: 'cohere_model',
+  perplexity: 'perplexity_model',
+  groq: 'groq_model',
+  ai21: 'ai21_model',
+  makersuite: 'google_model',
+  vertexai: 'vertexai_model',
+  xai: 'xai_model',
+  aimlapi: 'aimlapi_model',
+  nanogpt: 'nanogpt_model',
+  chutes: 'chutes_model',
+  electronhub: 'electronhub_model',
+  pollinations: 'pollinations_model',
+  moonshot: 'moonshot_model',
+  fireworks: 'fireworks_model',
+  cometapi: 'cometapi_model',
+  azure_openai: 'azure_openai_model',
+  zai: 'zai_model',
+  siliconflow: 'siliconflow_model',
+};
+
+/**
  * Direct API call through ST's backend — sends ONLY the consolidation prompt,
  * without the full system prompt, character sheet, lorebook etc.
  * Saves massive amounts of tokens on every consolidation call.
@@ -110,7 +141,7 @@ async function directLlmCall(prompt) {
   const ctx = SillyTavern.getContext();
   const mainApi = ctx.mainApi;
 
-  // Only works for chat completion type APIs (openai covers DeepSeek, Claude, OpenRouter, etc.)
+  // Only works for chat completion type APIs
   if (mainApi !== 'openai') return null;
 
   const settings = ctx.chatCompletionSettings;
@@ -118,11 +149,13 @@ async function directLlmCall(prompt) {
 
   const source = settings.chat_completion_source;
 
-  // Determine model name based on source
-  let model = settings.openai_model;
-  if (source === 'claude') model = settings.claude_model;
-  if (source === 'openrouter') model = settings.openrouter_model;
-  if (!model) return null;
+  // Look up model name from source-specific settings field
+  const modelField = SOURCE_MODEL_MAP[source];
+  const model = modelField ? settings[modelField] : null;
+  if (!model) {
+    console.warn('[NeuroCore] No model found for source:', source);
+    return null;
+  }
 
   const headers = ctx.getRequestHeaders();
 
@@ -158,7 +191,8 @@ async function directLlmCall(prompt) {
   });
 
   if (!response.ok) {
-    throw new Error(`API responded with ${response.status} ${response.statusText}`);
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`API responded with ${response.status} ${response.statusText}: ${errorText.slice(0, 200)}`);
   }
 
   const data = await response.json();
