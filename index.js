@@ -163,13 +163,13 @@ async function directLlmCall(prompt) {
     messages: [
       {
         role: 'system',
-        content: 'Du bist ein Analyse-Assistent für ein Gedächtnissystem. Antworte präzise und nur im geforderten Format.',
+        content: 'Du bist ein Analyse-Assistent für ein Gedächtnissystem. Antworte DIREKT und NUR mit dem geforderten Format (JSON/Text). Keine Erklärungen, kein Nachdenken, nur das Ergebnis.',
       },
       { role: 'user', content: prompt },
     ],
     model,
     temperature: 0.3,
-    max_tokens: 500,
+    max_tokens: 4000,
     chat_completion_source: source,
     stream: false,
   };
