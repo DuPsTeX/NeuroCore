@@ -159,17 +159,23 @@ async function directLlmCall(prompt) {
 
   const headers = ctx.getRequestHeaders();
 
+  // DeepSeek-Reasoner uses reasoning tokens from max_tokens budget,
+  // doesn't support system role or temperature
+  const isReasoner = model.includes('reasoner');
+  const systemInstruction = 'Du bist ein Analyse-Assistent für ein Gedächtnissystem. Antworte DIREKT und NUR mit dem geforderten Format (JSON/Text). Keine Erklärungen, kein Nachdenken, nur das Ergebnis.';
+
+  const messages = isReasoner
+    ? [{ role: 'user', content: `${systemInstruction}\n\n${prompt}` }]
+    : [
+        { role: 'system', content: systemInstruction },
+        { role: 'user', content: prompt },
+      ];
+
   const payload = {
-    messages: [
-      {
-        role: 'system',
-        content: 'Du bist ein Analyse-Assistent für ein Gedächtnissystem. Antworte DIREKT und NUR mit dem geforderten Format (JSON/Text). Keine Erklärungen, kein Nachdenken, nur das Ergebnis.',
-      },
-      { role: 'user', content: prompt },
-    ],
+    messages,
     model,
-    temperature: 0.3,
-    max_tokens: 4000,
+    temperature: isReasoner ? undefined : 0.3,
+    max_tokens: isReasoner ? 8000 : 4000,
     chat_completion_source: source,
     stream: false,
   };
@@ -198,7 +204,15 @@ async function directLlmCall(prompt) {
   const data = await response.json();
 
   // Handle various response formats from different providers
-  if (data.choices?.[0]?.message?.content) return data.choices[0].message.content;
+  const msg = data.choices?.[0]?.message;
+  if (msg) {
+    // DeepSeek-Reasoner returns content in reasoning_content, with empty content field
+    if (msg.content) return msg.content;
+    if (msg.reasoning_content) {
+      console.log('[NeuroCore] Using reasoning_content (DeepSeek-Reasoner)');
+      return msg.reasoning_content;
+    }
+  }
   if (data.choices?.[0]?.text) return data.choices[0].text;
   if (typeof data === 'string') return data;
   if (data.content) {
