@@ -158,7 +158,48 @@ export class NeuroController {
     return episodeId;
   }
 
+  /**
+   * Build a fresh injection from current DB state (semantic nodes, recent episodes, patterns).
+   * Called by getPromptInjection when lastPromptInjection is empty (e.g. after consolidation/chat switch).
+   */
+  rebuildInjection() {
+    // Get recent episodes (most recent by timestamp, no keyword filter)
+    const episodes = this.db.all(
+      'SELECT * FROM episodes ORDER BY timestamp DESC LIMIT ?', [20]
+    );
+
+    // Get all semantic facts
+    const allNodes = this.db.all('SELECT * FROM semantic_nodes WHERE confidence >= 0.3 ORDER BY confidence DESC LIMIT 20');
+
+    // Get active patterns
+    const patterns = this.db.all('SELECT * FROM procedural_patterns ORDER BY activation_count DESC LIMIT 5');
+
+    // Get latest emotional state
+    const latestEpisode = episodes[0];
+    let emotionalState = null;
+    if (latestEpisode) {
+      const tags = this.db.all('SELECT * FROM emotional_tags WHERE episode_id = ?', [latestEpisode.id]);
+      if (tags.length > 0) {
+        emotionalState = { emotions: tags.map(t => ({ type: t.emotion, intensity: t.intensity })) };
+      }
+    }
+
+    this.lastPromptInjection = this.pfc.assemblePromptInjection({
+      episodes: episodes.slice(0, this.settings.maxSlots),
+      semanticFacts: allNodes.slice(0, 10),
+      patterns: patterns.slice(0, 5),
+      emotionalState,
+    });
+
+    return this.lastPromptInjection;
+  }
+
   getPromptInjection(maxContextTokens = 4096) {
+    // Rebuild if empty (after consolidation, chat switch, or first call)
+    if (!this.lastPromptInjection) {
+      this.rebuildInjection();
+    }
+
     const tokenBudget = Math.floor(maxContextTokens * (this.settings.tokenBudgetPercent / 100));
     const estimated = this.pfc.estimateTokens(this.lastPromptInjection);
     console.log('[NeuroCore] getPromptInjection — lastInjection length:', this.lastPromptInjection.length,

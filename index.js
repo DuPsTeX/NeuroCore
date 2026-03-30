@@ -582,6 +582,9 @@ async function onConsolidate() {
     await neuro.consolidation.runFullCycle(msgCount);
     await neuro.db.save();
     console.log('[NeuroCore] Consolidation complete');
+    // Force rebuild of injection with updated semantic data
+    neuro.lastPromptInjection = '';
+    neuro.rebuildInjection();
     updateExtensionPrompt();
     refreshDashboard();
   } catch (err) {

@@ -115,11 +115,20 @@ export class Consolidation {
     if (!this.generateSummary || episodes.length < 2) return;
 
     try {
-      const excerpt = episodes.slice(0, 20).map(ep => {
+      // Use more text per episode for richer detail extraction
+      // Budget: ~12k chars total (~3500 tokens) to stay well within 4000 max_tokens
+      const maxExcerptChars = 12000;
+      let totalChars = 0;
+      const parts = [];
+      for (const ep of episodes.slice(0, 30)) {
         const sender = JSON.parse(ep.participants || '["?"]')[0];
-        const text = ep.content.length > 500 ? ep.content.slice(0, 500) + '...' : ep.content;
-        return `[${sender}]: ${text}`;
-      }).join('\n\n');
+        const text = ep.content.length > 1500 ? ep.content.slice(0, 1500) + '...' : ep.content;
+        const part = `[${sender}]: ${text}`;
+        if (totalChars + part.length > maxExcerptChars) break;
+        totalChars += part.length;
+        parts.push(part);
+      }
+      const excerpt = parts.join('\n\n');
 
       const prompt = `Analysiere diesen RP-Chatverlauf und extrahiere ALLE Entitäten mit Details.
 
