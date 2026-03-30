@@ -41,7 +41,8 @@ export class Consolidation {
       if (this.generateSummary) {
         try {
           const texts = cluster.map(e => e.content).join('\n');
-          summary = await this.generateSummary(texts);
+          const prompt = `Fasse die folgenden Ereignisse in 1-2 Sätzen zusammen. Behalte die Sprache bei:\n\n${texts}`;
+          summary = await this.generateSummary(prompt);
         } catch {
           // LLM fallback: concatenate first sentences
           summary = this._fallbackSummary(cluster);

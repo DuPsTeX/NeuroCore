@@ -84,14 +84,95 @@ window.addEventListener?.('error', (e) => {
 });
 
 function createLlmCallback(context) {
-  return async (text) => {
+  return async (prompt) => {
+    // Try direct lightweight API call first (no system prompt overhead)
+    try {
+      const result = await directLlmCall(prompt);
+      if (result) return result;
+    } catch (err) {
+      console.warn('[NeuroCore] Direct API call failed, falling back to generateQuietPrompt:', err.message);
+    }
+
+    // Fallback: generateQuietPrompt (includes full ST context — heavier)
     if (typeof context.generateQuietPrompt === 'function') {
-      return context.generateQuietPrompt(
-        `Fasse die folgenden Ereignisse in 1-2 Sätzen zusammen. Behalte die Sprache bei:\n\n${text}`
-      );
+      return context.generateQuietPrompt(prompt);
     }
     return null;
   };
+}
+
+/**
+ * Direct API call through ST's backend — sends ONLY the consolidation prompt,
+ * without the full system prompt, character sheet, lorebook etc.
+ * Saves massive amounts of tokens on every consolidation call.
+ */
+async function directLlmCall(prompt) {
+  const ctx = SillyTavern.getContext();
+  const mainApi = ctx.mainApi;
+
+  // Only works for chat completion type APIs (openai covers DeepSeek, Claude, OpenRouter, etc.)
+  if (mainApi !== 'openai') return null;
+
+  const settings = ctx.chatCompletionSettings;
+  if (!settings) return null;
+
+  const source = settings.chat_completion_source;
+
+  // Determine model name based on source
+  let model = settings.openai_model;
+  if (source === 'claude') model = settings.claude_model;
+  if (source === 'openrouter') model = settings.openrouter_model;
+  if (!model) return null;
+
+  const headers = ctx.getRequestHeaders();
+
+  const payload = {
+    messages: [
+      {
+        role: 'system',
+        content: 'Du bist ein Analyse-Assistent für ein Gedächtnissystem. Antworte präzise und nur im geforderten Format.',
+      },
+      { role: 'user', content: prompt },
+    ],
+    model,
+    temperature: 0.3,
+    max_tokens: 500,
+    chat_completion_source: source,
+    stream: false,
+  };
+
+  // Pass reverse proxy settings if configured (custom API endpoints)
+  if (settings.reverse_proxy) {
+    payload.reverse_proxy = settings.reverse_proxy;
+    if (settings.proxy_password) {
+      payload.proxy_password = settings.proxy_password;
+    }
+  }
+
+  console.log('[NeuroCore] Direct API call — source:', source, 'model:', model);
+
+  const response = await fetch('/api/backends/chat-completions/generate', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`API responded with ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json();
+
+  // Handle various response formats from different providers
+  if (data.choices?.[0]?.message?.content) return data.choices[0].message.content;
+  if (data.choices?.[0]?.text) return data.choices[0].text;
+  if (typeof data === 'string') return data;
+  if (data.content) {
+    return typeof data.content === 'string' ? data.content : data.content[0]?.text;
+  }
+
+  console.warn('[NeuroCore] Unexpected API response format:', JSON.stringify(data).slice(0, 200));
+  return null;
 }
 
 function getChatId(context) {
