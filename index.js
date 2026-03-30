@@ -590,7 +590,10 @@ async function onConsolidate() {
 }
 
 function onShowInjection() {
-  const injection = neuro.lastPromptInjection || '';
+  // Show what will ACTUALLY be sent to the AI (with token budget applied)
+  const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
+  const maxCtx = ctx?.maxContext || 4096;
+  const injection = neuro.getPromptInjection(maxCtx);
   const container = $('#neurocore-injection-content');
   const meta = $('#neurocore-popup-meta');
   const popup = $('#neurocore-injection-popup');
@@ -601,11 +604,10 @@ function onShowInjection() {
   } else {
     container.text(injection);
     const tokens = neuro.pfc.estimateTokens(injection);
-    const context = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
-    const maxCtx = context?.maxContext || 4096;
+    const rawTokens = neuro.pfc.estimateTokens(neuro.lastPromptInjection || '');
     const budget = Math.floor(maxCtx * (neuro.settings.tokenBudgetPercent / 100));
     meta.html(
-      `<span>~${tokens} Tokens</span>` +
+      `<span>~${tokens} Tokens (roh: ~${rawTokens})</span>` +
       `<span>Budget: ${budget} / ${maxCtx} (${neuro.settings.tokenBudgetPercent}%)</span>` +
       `<span>Slots: ${neuro.settings.maxSlots}</span>`
     );
