@@ -104,13 +104,197 @@ export class Consolidation {
     // 1. Create semantic edges between co-occurring proper nouns
     this._createCoOccurrenceEdges(recent);
 
-    // 2. Strengthen existing + discover new procedural patterns
+    // 2. Extract detailed entity info (characters, locations, items)
+    await this._extractEntityDetails(recent);
+
+    // 3. Strengthen existing + discover new procedural patterns
     await this._extractPatterns(recent);
 
-    // 3. Decay unrewarded habits + discover new ones
+    // 4. Decay unrewarded habits + discover new ones
     await this._updateHabitStrengths(recent);
 
     this._log(msgCount, 'rem_sleep');
+  }
+
+  /**
+   * Extract detailed properties for characters, locations, and items via LLM.
+   * Updates existing semantic nodes with rich properties (appearance, personality, etc.)
+   * and creates new nodes for locations and items.
+   */
+  async _extractEntityDetails(episodes) {
+    if (!this.generateSummary || episodes.length < 2) return;
+
+    try {
+      const excerpt = episodes.slice(0, 20).map(ep => {
+        const sender = JSON.parse(ep.participants || '["?"]')[0];
+        const text = ep.content.length > 500 ? ep.content.slice(0, 500) + '...' : ep.content;
+        return `[${sender}]: ${text}`;
+      }).join('\n\n');
+
+      const prompt = `Analysiere diesen RP-Chatverlauf und extrahiere ALLE Entitäten mit Details.
+
+Extrahiere 3 Kategorien:
+
+## 1. CHARACTERS (Personen/Charaktere)
+Für jeden Charakter extrahiere SO DETAILLIERT WIE MÖGLICH:
+- name: Vollständiger Name
+- geschlecht: männlich/weiblich/andere
+- aussehen_gesicht: Augenfarbe, Haarfarbe, Haarlänge, Frisur, Gesichtszüge, Augenform etc.
+- aussehen_koerper: Körpergröße, Statur, Körperbau, Brustgröße (bei Frauen), Hüften, Beine, Haut, Narben, Tattoos, Muttermale etc.
+- kleidung: Aktuelle Kleidung, Rüstung, Accessoires
+- ausruestung: Waffen, Werkzeuge, magische Gegenstände
+- persoenlichkeit: Charakterzüge, Temperament, Eigenarten
+- rolle: Beruf, Klasse, Funktion in der Geschichte
+- faehigkeiten: Magie, Kampfstil, besondere Fähigkeiten
+- beziehungen: Beziehungen zu anderen Charakteren (z.B. "Freundin von X", "Rivale von Y")
+- sonstiges: Alles andere Wichtige (Alter, Rasse/Spezies, Herkunft etc.)
+
+## 2. LOCATIONS (Orte)
+- name: Name des Ortes
+- beschreibung: Detaillierte Beschreibung (Atmosphäre, Aussehen, Besonderheiten)
+- typ: Art des Ortes (Taverne, Wald, Stadt, Dungeon etc.)
+
+## 3. ITEMS (Wichtige Gegenstände)
+- name: Name des Gegenstands
+- beschreibung: Aussehen und Eigenschaften
+- besitzer: Wem gehört es?
+- typ: Art (Waffe, Artefakt, Trank etc.)
+
+WICHTIG:
+- Nur Informationen extrahieren die EXPLIZIT im Text stehen oder klar impliziert werden
+- Leere Felder weglassen (nicht raten!)
+- Behalte die Originalsprache bei
+
+Antworte NUR mit JSON:
+{"characters": [...], "locations": [...], "items": [...]}
+
+Chatverlauf:
+${excerpt}`;
+
+      const result = await this.generateSummary(prompt);
+      if (!result) return;
+
+      const jsonMatch = result.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return;
+
+      let entities;
+      try {
+        entities = JSON.parse(jsonMatch[0]);
+      } catch {
+        console.warn('[NeuroCore] Failed to parse entity extraction response');
+        return;
+      }
+
+      // Process characters
+      if (Array.isArray(entities.characters)) {
+        for (const char of entities.characters) {
+          if (!char.name) continue;
+          const label = char.name.trim();
+
+          // Create or find the character node
+          const nodeId = this.temporal.addNode({
+            type: 'character',
+            label,
+            properties: {},
+          });
+
+          // Build properties object from all non-empty fields
+          const props = {};
+          const fieldMap = {
+            geschlecht: 'geschlecht',
+            aussehen_gesicht: 'aussehen_gesicht',
+            aussehen_koerper: 'aussehen_koerper',
+            kleidung: 'kleidung',
+            ausruestung: 'ausruestung',
+            persoenlichkeit: 'persoenlichkeit',
+            rolle: 'rolle',
+            faehigkeiten: 'faehigkeiten',
+            beziehungen: 'beziehungen',
+            sonstiges: 'sonstiges',
+          };
+
+          for (const [srcKey, destKey] of Object.entries(fieldMap)) {
+            if (char[srcKey] && String(char[srcKey]).trim()) {
+              props[destKey] = String(char[srcKey]).trim();
+            }
+          }
+
+          if (Object.keys(props).length > 0) {
+            this.temporal.updateNodeProperties(nodeId, props);
+            console.log('[NeuroCore] Updated character:', label, '— fields:', Object.keys(props).join(', '));
+          }
+        }
+      }
+
+      // Process locations
+      if (Array.isArray(entities.locations)) {
+        for (const loc of entities.locations) {
+          if (!loc.name) continue;
+          const label = loc.name.trim();
+
+          const nodeId = this.temporal.addNode({
+            type: 'location',
+            label,
+            properties: {},
+          });
+
+          const props = {};
+          if (loc.beschreibung) props.beschreibung = loc.beschreibung;
+          if (loc.typ) props.typ = loc.typ;
+
+          if (Object.keys(props).length > 0) {
+            this.temporal.updateNodeProperties(nodeId, props);
+            console.log('[NeuroCore] Updated location:', label);
+          }
+        }
+      }
+
+      // Process items
+      if (Array.isArray(entities.items)) {
+        for (const item of entities.items) {
+          if (!item.name) continue;
+          const label = item.name.trim();
+
+          const nodeId = this.temporal.addNode({
+            type: 'item',
+            label,
+            properties: {},
+          });
+
+          const props = {};
+          if (item.beschreibung) props.beschreibung = item.beschreibung;
+          if (item.besitzer) props.besitzer = item.besitzer;
+          if (item.typ) props.typ = item.typ;
+
+          if (Object.keys(props).length > 0) {
+            this.temporal.updateNodeProperties(nodeId, props);
+            console.log('[NeuroCore] Updated item:', label);
+          }
+        }
+      }
+
+      // Create relationship edges between characters
+      if (Array.isArray(entities.characters)) {
+        for (const char of entities.characters) {
+          if (!char.name || !char.beziehungen) continue;
+          const sourceNode = this.temporal.getNodeByLabel(char.name.trim());
+          if (!sourceNode) continue;
+
+          // Try to find mentioned character names in the relationship text
+          for (const otherChar of entities.characters) {
+            if (!otherChar.name || otherChar.name === char.name) continue;
+            if (char.beziehungen.includes(otherChar.name)) {
+              const targetNode = this.temporal.getNodeByLabel(otherChar.name.trim());
+              if (targetNode) {
+                this.temporal.addEdge(sourceNode.id, targetNode.id, 'relationship', 0.6);
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[NeuroCore] Entity extraction failed:', err.message);
+    }
   }
 
   async _extractPatterns(episodes) {

@@ -57,15 +57,43 @@ export class PrefrontalCortex {
       lines.push('');
     }
 
-    // Semantic facts
+    // Semantic facts — grouped by type for better readability
     if (semanticFacts.length > 0) {
-      lines.push('## Relevantes Wissen:');
+      const byType = {};
       for (const fact of semanticFacts) {
-        const props = typeof fact.properties === 'string' ? JSON.parse(fact.properties) : fact.properties;
-        const propsStr = Object.entries(props).map(([k, v]) => `${k}: ${v}`).join(', ');
-        lines.push(`- ${fact.label} (${fact.type})${propsStr ? ': ' + propsStr : ''}`);
+        const t = fact.type || 'other';
+        if (!byType[t]) byType[t] = [];
+        byType[t].push(fact);
       }
-      lines.push('');
+
+      const typeLabels = {
+        character: 'Bekannte Charaktere',
+        location: 'Bekannte Orte',
+        item: 'Bekannte Gegenstände',
+        event: 'Bekannte Ereignisse',
+        concept: 'Bekannte Konzepte',
+      };
+
+      for (const [type, facts] of Object.entries(byType)) {
+        lines.push(`## ${typeLabels[type] || 'Relevantes Wissen'}:`);
+        for (const fact of facts) {
+          const props = typeof fact.properties === 'string' ? JSON.parse(fact.properties) : fact.properties;
+          const entries = Object.entries(props).filter(([, v]) => v);
+          if (entries.length === 0) {
+            lines.push(`- ${fact.label}`);
+          } else if (type === 'character' && entries.length > 2) {
+            // Detailed character block
+            lines.push(`- **${fact.label}**:`);
+            for (const [k, v] of entries) {
+              lines.push(`  ${k}: ${v}`);
+            }
+          } else {
+            const propsStr = entries.map(([k, v]) => `${k}: ${v}`).join(', ');
+            lines.push(`- ${fact.label}: ${propsStr}`);
+          }
+        }
+        lines.push('');
+      }
     }
 
     // Procedural patterns

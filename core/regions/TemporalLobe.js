@@ -33,6 +33,29 @@ export class TemporalLobe {
     );
   }
 
+  /**
+   * Merge new properties into an existing node. Existing keys are preserved
+   * unless the new value is longer/more detailed (longer string wins).
+   */
+  updateNodeProperties(nodeId, newProps) {
+    const node = this.db.get('SELECT * FROM semantic_nodes WHERE id = ?', [nodeId]);
+    if (!node) return;
+
+    const existing = typeof node.properties === 'string' ? JSON.parse(node.properties) : (node.properties || {});
+
+    for (const [key, value] of Object.entries(newProps)) {
+      if (!value) continue;
+      const oldVal = existing[key];
+      // Keep the longer/more detailed value
+      if (!oldVal || String(value).length > String(oldVal).length) {
+        existing[key] = value;
+      }
+    }
+
+    this.db.run('UPDATE semantic_nodes SET properties = ? WHERE id = ?',
+      [JSON.stringify(existing), nodeId]);
+  }
+
   getNodeByLabel(label) {
     return this.db.get(
       'SELECT * FROM semantic_nodes WHERE label = ? COLLATE NOCASE',
