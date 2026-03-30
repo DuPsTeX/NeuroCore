@@ -94,8 +94,12 @@ export class Consolidation {
     // 1. Create semantic edges between co-occurring proper nouns
     this._createCoOccurrenceEdges(recent);
 
-    // 2. Extract detailed entity info (characters, locations, items)
-    await this._extractEntityDetails(recent);
+    // 2. Extract detailed entity info from ALL episodes (not just unconsolidated)
+    //    Appearance descriptions are often in older messages that are already consolidated
+    const allEpisodes = this.db.all(
+      'SELECT * FROM episodes ORDER BY timestamp DESC LIMIT 50'
+    );
+    await this._extractEntityDetails(allEpisodes);
 
     // 3. Strengthen existing + discover new procedural patterns
     await this._extractPatterns(recent);
@@ -115,14 +119,21 @@ export class Consolidation {
     if (!this.generateSummary || episodes.length < 2) return;
 
     try {
-      // Use more text per episode for richer detail extraction
-      // Budget: ~12k chars total (~3500 tokens) to stay well within 4000 max_tokens
-      const maxExcerptChars = 12000;
+      // Prioritize episodes with appearance/description keywords for richer extraction
+      const descKeywords = /aussehen|haar|augen|groß|schlank|muskulös|kleid|rüstung|fell|haut|narbe|tattoo|brust|hüft|schön|hübsch|jung|alt|tragen|trägt|gekleidet|erschein/i;
+      const withDesc = episodes.filter(ep => descKeywords.test(ep.content));
+      const withoutDesc = episodes.filter(ep => !descKeywords.test(ep.content));
+
+      // Put description-heavy episodes first, then fill with others
+      const sorted = [...withDesc, ...withoutDesc];
+
+      // Budget: ~16k chars total to give the LLM enough material
+      const maxExcerptChars = 16000;
       let totalChars = 0;
       const parts = [];
-      for (const ep of episodes.slice(0, 30)) {
+      for (const ep of sorted.slice(0, 50)) {
         const sender = JSON.parse(ep.participants || '["?"]')[0];
-        const text = ep.content.length > 1500 ? ep.content.slice(0, 1500) + '...' : ep.content;
+        const text = ep.content.length > 2000 ? ep.content.slice(0, 2000) + '...' : ep.content;
         const part = `[${sender}]: ${text}`;
         if (totalChars + part.length > maxExcerptChars) break;
         totalChars += part.length;
