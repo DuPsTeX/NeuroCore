@@ -47,12 +47,15 @@ export class PrefrontalCortex {
   assemblePromptInjection({ episodes = [], semanticFacts = [], patterns = [], emotionalState = null }) {
     const lines = ['[NeuroCore Memory Injection — START]', ''];
 
-    // Active memories
+    // Active memories — truncated to key content, not full messages
     if (episodes.length > 0) {
       lines.push('## Aktive Erinnerungen (Working Memory):');
       for (const ep of episodes) {
         const valenceLabel = ep.emotional_valence > 0.6 ? ' (intensiv)' : '';
-        lines.push(`- ${ep.content}${valenceLabel}`);
+        const summary = this._truncateEpisode(ep.content);
+        if (summary) {
+          lines.push(`- ${summary}${valenceLabel}`);
+        }
       }
       lines.push('');
     }
@@ -116,5 +119,62 @@ export class PrefrontalCortex {
     lines.push('[NeuroCore Memory Injection — ENDE]');
 
     return lines.join('\n');
+  }
+
+  /**
+   * Truncate an episode to its narrative core.
+   * Strips stat blocks, markdown formatting, choice options, and OOC notes.
+   * Keeps only dialogue and action descriptions, max 200 chars.
+   */
+  _truncateEpisode(content) {
+    if (!content) return '';
+
+    let text = content;
+
+    // Remove stat blocks (lines starting with ** followed by stat-like patterns)
+    text = text.replace(/\*\*(?:Level|XP|Geld|MP|HP|STR|DEX|CON|INT|WIS|CHA|Status|Erregung|Hunger|Sauberkeit|Ausdauer|Ausrüstung|Inventar|Fähigkeiten|Basiswerte|Standort)[:\s|].+/gi, '');
+
+    // Remove section headers like "### Tay's Status", "### Gruppenstatus", "---"
+    text = text.replace(/^#{1,4}\s+.+$/gm, '');
+    text = text.replace(/^---+$/gm, '');
+
+    // Remove choice blocks (lines starting with * A), * B), etc. or **A)**, **B)**)
+    text = text.replace(/^\s*\*?\s*\*?\*?\s*[A-E]\)[\s\S]*?$/gm, '');
+
+    // Remove OOC blocks
+    text = text.replace(/\(OOC:[\s\S]*?\)/gi, '');
+
+    // Remove markdown bold/italic markers but keep text
+    text = text.replace(/\*\*([^*]+)\*\*/g, '$1');
+    text = text.replace(/\*([^*]+)\*/g, '$1');
+
+    // Remove bullet point group status lines
+    text = text.replace(/^\s*\*\s+\*\*(?:Luna|Lana|Sari|Kaito|Tay)[:\*][\s\S]*?$/gm, '');
+
+    // Collapse whitespace
+    text = text.replace(/\n{2,}/g, '\n').replace(/\s{2,}/g, ' ').trim();
+
+    // If still too long, take first meaningful chunk
+    if (text.length > 300) {
+      // Try to find the first dialogue or action paragraph
+      const dialogueMatch = text.match(/"[^"]{10,}"/);
+      if (dialogueMatch) {
+        // Get some context around the dialogue
+        const idx = text.indexOf(dialogueMatch[0]);
+        const start = Math.max(0, idx - 50);
+        const end = Math.min(text.length, idx + dialogueMatch[0].length + 50);
+        text = text.slice(start, end).trim();
+      } else {
+        text = text.slice(0, 300);
+      }
+    }
+
+    // Final trim to 200 chars with word boundary
+    if (text.length > 200) {
+      const cut = text.lastIndexOf(' ', 200);
+      text = text.slice(0, cut > 100 ? cut : 200) + '...';
+    }
+
+    return text;
   }
 }

@@ -78,19 +78,9 @@ export class Consolidation {
       // Mark source episodes as consolidated
       this.hippo.markConsolidated(cluster.map(e => e.id));
 
-      // Add proper nouns from cluster to semantic graph
-      for (const ep of cluster) {
-        const kws = extractKeywords(ep.content);
-        for (const kw of kws) {
-          if (kw.isProperNoun) {
-            this.temporal.addNode({
-              type: 'character',
-              label: kw.word.charAt(0).toUpperCase() + kw.word.slice(1),
-              properties: {},
-            });
-          }
-        }
-      }
+      // Note: Entity extraction (characters, locations, items) is now handled
+      // by _extractEntityDetails() in the REM phase via LLM, which assigns
+      // correct types and detailed properties.
     }
 
     this._log(msgCount, 'deep_sleep');

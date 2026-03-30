@@ -27,10 +27,69 @@ const STOPWORDS = new Set([
 ]);
 
 // German common nouns that start uppercase (not proper nouns)
+// Extensive list to avoid false positive proper noun detection, especially in RP contexts
 const GERMAN_COMMON_NOUNS = new Set([
-  'haus', 'stadt', 'land', 'berg', 'wald', 'fluss', 'weg', 'tag', 'nacht',
-  'mann', 'frau', 'kind', 'welt', 'zeit', 'leben', 'hand', 'kopf', 'auge',
-  'marktplatz', 'straße', 'platz', 'schule', 'kirche',
+  // Körper & Aussehen
+  'auge', 'augen', 'haar', 'haare', 'haut', 'kopf', 'hand', 'hände', 'arm', 'arme',
+  'bein', 'beine', 'brust', 'brüste', 'schulter', 'schultern', 'rücken', 'bauch',
+  'gesicht', 'mund', 'lippen', 'nase', 'ohr', 'ohren', 'finger', 'zähne', 'hals',
+  'stirn', 'kinn', 'wange', 'wangen', 'körper', 'hüfte', 'hüften', 'taille',
+  'muskel', 'muskeln', 'narbe', 'narben', 'tattoo', 'tattoos', 'schwanz',
+  // Kleidung & Ausrüstung
+  'kleidung', 'rüstung', 'helm', 'schild', 'schwert', 'dolch', 'axt', 'bogen',
+  'stab', 'waffe', 'waffen', 'ring', 'kette', 'amulett', 'umhang', 'mantel',
+  'hose', 'hemd', 'tunika', 'stiefel', 'gürtel', 'handschuhe', 'hut', 'kappe',
+  'leder', 'stoff', 'seide', 'wolle', 'eisen', 'stahl', 'panzer', 'kettenhemd',
+  'tasche', 'beutel', 'rucksack', 'geldbeutel', 'inventar', 'ausrüstung',
+  // Materialien & Werte
+  'gold', 'silber', 'kupfer', 'bronze', 'holz', 'stein', 'kristall', 'edelstein',
+  'diamant', 'rubin', 'smaragd', 'saphir', 'perle', 'geld', 'münze', 'münzen',
+  // Orte & Gebäude (generisch)
+  'haus', 'stadt', 'dorf', 'land', 'berg', 'wald', 'fluss', 'see', 'meer',
+  'weg', 'straße', 'gasse', 'brücke', 'tor', 'mauer', 'turm', 'burg',
+  'schloss', 'tempel', 'kirche', 'taverne', 'herberge', 'laden', 'markt',
+  'marktplatz', 'platz', 'schule', 'gilde', 'halle', 'kammer', 'kerker',
+  'höhle', 'dungeon', 'treppe', 'tür', 'fenster', 'raum', 'zimmer',
+  'gasthaus', 'wirtshaus', 'werkstatt', 'schmiede', 'bibliothek',
+  // Natur
+  'baum', 'blume', 'gras', 'wiese', 'fels', 'felsen', 'bach', 'quelle',
+  'sonne', 'mond', 'stern', 'sterne', 'himmel', 'wolke', 'wolken',
+  'regen', 'schnee', 'wind', 'feuer', 'wasser', 'erde', 'luft', 'licht',
+  'schatten', 'dunkelheit', 'nacht', 'tag', 'morgen', 'abend', 'mittag',
+  // Personen (generisch)
+  'mann', 'frau', 'kind', 'kinder', 'mädchen', 'junge', 'krieger', 'magier',
+  'magierin', 'heiler', 'heilerin', 'händler', 'wache', 'wachen', 'soldat',
+  'ritter', 'priester', 'dieb', 'barde', 'könig', 'königin', 'prinz',
+  'prinzessin', 'bauer', 'schmied', 'wirt', 'meister', 'lehrling',
+  'abenteurer', 'gegner', 'feind', 'freund', 'gruppe', 'party', 'begleiter',
+  'anführer', 'chef', 'boss', 'charakter', 'held', 'heldin', 'opfer',
+  // Wesen & Kreaturen
+  'drache', 'goblin', 'ork', 'troll', 'wolf', 'fuchs', 'pferd', 'hund',
+  'katze', 'vogel', 'schlange', 'spinne', 'monster', 'bestie', 'tier',
+  'dämon', 'geist', 'skelett', 'zombie', 'untote', 'werwolf', 'vampir',
+  // Kampf & Abenteuer
+  'kampf', 'angriff', 'verteidigung', 'schlag', 'hieb', 'stich', 'schuss',
+  'treffer', 'schaden', 'heilung', 'zauber', 'magie', 'mana', 'fähigkeit',
+  'level', 'erfahrung', 'quest', 'auftrag', 'mission', 'abenteuer',
+  'beute', 'belohnung', 'flucht', 'sieg', 'niederlage', 'tod', 'blut',
+  'wunde', 'verletzung', 'gift', 'trank', 'heiltrank', 'antidot',
+  // Emotionen & Zustände
+  'angst', 'wut', 'freude', 'trauer', 'hoffnung', 'mut', 'stolz', 'scham',
+  'liebe', 'hass', 'furcht', 'schmerz', 'erregung', 'hunger', 'durst',
+  'müdigkeit', 'erschöpfung', 'kraft', 'stärke', 'schwäche', 'status',
+  // Abstrakt & Allgemein
+  'welt', 'zeit', 'leben', 'ende', 'anfang', 'mitte', 'seite', 'teil',
+  'art', 'weise', 'grund', 'ziel', 'plan', 'idee', 'frage', 'antwort',
+  'stimme', 'blick', 'geruch', 'geschmack', 'geräusch', 'gefühl',
+  'gedanke', 'erinnerung', 'wissen', 'geheimnis', 'wahrheit', 'lüge',
+  'name', 'wort', 'sprache', 'geschichte', 'recht', 'gesetz', 'regel',
+  'macht', 'kontrolle', 'freiheit', 'gefahr', 'schutz', 'hilfe',
+  'richtung', 'entscheidung', 'erfolg', 'versagen', 'chance', 'risiko',
+  // RPG-spezifisch
+  'rang', 'lizenz', 'halsband', 'sklave', 'sklaven', 'verzauberung',
+  'runenstein', 'runensteine', 'notizbuch', 'formular', 'papier',
+  'verband', 'ration', 'wasserflasche', 'tagebuch', 'stift',
+  'knochendolch', 'keule', 'faust', 'tritt', 'würfel',
 ]);
 
 function isProperNounAt(originalTokens, index) {
