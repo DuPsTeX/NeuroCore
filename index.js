@@ -291,6 +291,50 @@ function bindDashboardEvents() {
   $(document).on('change', '#neurocore-s-interval', function () {
     neuro.settings.consolidationInterval = parseInt($(this).val()) || 10;
   });
+
+  // Plot Memory settings
+  $(document).on('change', '#neurocore-s-enable-plot', function () {
+    const isEnabled = $(this).is(':checked');
+    neuro.settings.enablePlotMemory = isEnabled;
+    $('#neurocore-plot-options').toggle(isEnabled);
+    console.log('[NeuroCore] Plot Memory', isEnabled ? 'aktiviert' : 'deaktiviert');
+    // Invalidate cache when toggling
+    if (neuro.plotGenerator) {
+      neuro.plotGenerator.invalidateCache();
+    }
+    // Rebuild injection with new mode
+    neuro.lastPromptInjection = '';
+    if (isEnabled) {
+      neuro.rebuildInjectionAsync().then(() => {
+        updateExtensionPrompt();
+      }).catch(err => {
+        console.error('[NeuroCore] Failed to rebuild plot injection:', err);
+      });
+    } else {
+      neuro.rebuildInjection();
+      updateExtensionPrompt();
+    }
+  });
+
+  $(document).on('change', '#neurocore-s-plot-episodes', function () {
+    neuro.settings.plotMemoryOptions.maxEpisodes = parseInt($(this).val()) || 20;
+    if (neuro.plotGenerator) neuro.plotGenerator.invalidateCache();
+  });
+
+  $(document).on('change', '#neurocore-s-plot-nodes', function () {
+    neuro.settings.plotMemoryOptions.maxSemanticNodes = parseInt($(this).val()) || 15;
+    if (neuro.plotGenerator) neuro.plotGenerator.invalidateCache();
+  });
+
+  $(document).on('change', '#neurocore-s-plot-timespan', function () {
+    neuro.settings.plotMemoryOptions.timeSpanMessages = parseInt($(this).val()) || 100;
+    if (neuro.plotGenerator) neuro.plotGenerator.invalidateCache();
+  });
+
+  $(document).on('change', '#neurocore-s-plot-emotional', function () {
+    neuro.settings.plotMemoryOptions.includeEmotionalArc = $(this).is(':checked');
+    if (neuro.plotGenerator) neuro.plotGenerator.invalidateCache();
+  });
 }
 
 function refreshDashboard() {
@@ -324,6 +368,16 @@ function refreshDashboard() {
   $('#neurocore-s-slots').val(neuro.settings.maxSlots);
   $('#neurocore-s-budget').val(neuro.settings.tokenBudgetPercent);
   $('#neurocore-s-interval').val(neuro.settings.consolidationInterval);
+
+  // Update Plot Memory settings
+  $('#neurocore-s-enable-plot').prop('checked', neuro.settings.enablePlotMemory);
+  $('#neurocore-plot-options').toggle(neuro.settings.enablePlotMemory);
+  if (neuro.settings.plotMemoryOptions) {
+    $('#neurocore-s-plot-episodes').val(neuro.settings.plotMemoryOptions.maxEpisodes || 20);
+    $('#neurocore-s-plot-nodes').val(neuro.settings.plotMemoryOptions.maxSemanticNodes || 15);
+    $('#neurocore-s-plot-timespan').val(neuro.settings.plotMemoryOptions.timeSpanMessages || 100);
+    $('#neurocore-s-plot-emotional').prop('checked', neuro.settings.plotMemoryOptions.includeEmotionalArc !== false);
+  }
 
   // Render active tab
   const activeTab = $('.neurocore-tab.active').data('tab') || 'memories';
@@ -623,7 +677,13 @@ function onShowInjection() {
     const tokens = neuro.pfc.estimateTokens(injection);
     const rawTokens = neuro.pfc.estimateTokens(neuro.lastPromptInjection || '');
     const budget = Math.floor(maxCtx * (neuro.settings.tokenBudgetPercent / 100));
+    
+    const modeLabel = neuro.settings.enablePlotMemory ? 
+      '<span style="color: #4caf50;">Plot Memory Modus</span>' : 
+      '<span style="color: #2196f3;">Standard Modus</span>';
+    
     meta.html(
+      `<span>${modeLabel}</span>` +
       `<span>~${tokens} Tokens (roh: ~${rawTokens})</span>` +
       `<span>Budget: ${budget} / ${maxCtx} (${neuro.settings.tokenBudgetPercent}%)</span>` +
       `<span>Slots: ${neuro.settings.maxSlots}</span>`

@@ -11,6 +11,7 @@ import { DecayEngine } from './processes/DecayEngine.js';
 import { SpreadingActivation } from './processes/SpreadingActivation.js';
 import { Consolidation } from './processes/Consolidation.js';
 import { Reconsolidation } from './processes/Reconsolidation.js';
+import { PlotGenerator } from './PlotGenerator.js';
 import { extractKeywords } from './KeywordExtractor.js';
 
 const DEFAULT_SETTINGS = {
@@ -18,6 +19,15 @@ const DEFAULT_SETTINGS = {
   tokenBudgetPercent: 15,
   consolidationInterval: 10,
   inactivityTimeoutMs: 5 * 60 * 1000,
+  // Plot Memory Settings
+  enablePlotMemory: false, // Aktiviert Plot-basiertes Memory statt Standard-Injection
+  plotMemoryOptions: {
+    maxEpisodes: 20,
+    maxSemanticNodes: 15,
+    maxPatterns: 5,
+    includeEmotionalArc: true,
+    timeSpanMessages: 100,
+  },
 };
 
 export class NeuroController {
@@ -56,6 +66,18 @@ export class NeuroController {
       cerebellum: this.cerebellum,
       basalGanglia: this.basalGanglia,
       generateSummary: llmCallback,
+    });
+
+    // Instantiate Plot Generator
+    this.plotGenerator = new PlotGenerator({
+      db: this.db,
+      hippocampus: this.hippocampus,
+      temporalLobe: this.temporalLobe,
+      cerebellum: this.cerebellum,
+      basalGanglia: this.basalGanglia,
+      amygdala: this.amygdala,
+      spreadingActivation: this.spreadingActivation,
+      llmCallback,
     });
 
     this._resetInactivityTimer();
@@ -128,13 +150,34 @@ export class NeuroController {
       }
     }
 
-    // 9. Build prompt injection (PFC)
-    this.lastPromptInjection = this.pfc.assemblePromptInjection({
-      episodes: episodes.slice(0, this.settings.maxSlots),
-      semanticFacts: semanticFacts.slice(0, 10),
-      patterns: patterns.slice(0, 5),
-      emotionalState: { currentValence: emotional.valence, emotions: emotional.emotions },
-    });
+    // 9. Build prompt injection
+    if (this.settings.enablePlotMemory) {
+      // Plot Memory Mode: Generate narrative plot
+      console.log('[NeuroCore] Generating plot memory for message');
+      try {
+        this.lastPromptInjection = await this.plotGenerator.generatePlot(
+          queryKeywords,
+          msgCount,
+          this.settings.plotMemoryOptions
+        );
+      } catch (error) {
+        console.error('[NeuroCore] Plot generation failed, falling back to standard:', error);
+        this.lastPromptInjection = this.pfc.assemblePromptInjection({
+          episodes: episodes.slice(0, this.settings.maxSlots),
+          semanticFacts: semanticFacts.slice(0, 10),
+          patterns: patterns.slice(0, 5),
+          emotionalState: { currentValence: emotional.valence, emotions: emotional.emotions },
+        });
+      }
+    } else {
+      // Standard Mode: Traditional injection (PFC)
+      this.lastPromptInjection = this.pfc.assemblePromptInjection({
+        episodes: episodes.slice(0, this.settings.maxSlots),
+        semanticFacts: semanticFacts.slice(0, 10),
+        patterns: patterns.slice(0, 5),
+        emotionalState: { currentValence: emotional.valence, emotions: emotional.emotions },
+      });
+    }
 
     // 10. Stabilize reconsolidation
     this.reconsolidation.stabilizeAll();
@@ -143,6 +186,10 @@ export class NeuroController {
     if (msgCount % this.settings.consolidationInterval === 0) {
       DecayEngine.tick(this.db, msgCount);
       await this.consolidation.runFullCycle(msgCount);
+      // Invalidate plot cache after consolidation
+      if (this.plotGenerator) {
+        this.plotGenerator.invalidateCache();
+      }
     }
 
     // 12. DB size check
@@ -161,8 +208,55 @@ export class NeuroController {
   /**
    * Build a fresh injection from current DB state (semantic nodes, recent episodes, patterns).
    * Called by getPromptInjection when lastPromptInjection is empty (e.g. after consolidation/chat switch).
+   * Note: This is synchronous. Plot Memory is generated asynchronously in processMessage.
    */
   rebuildInjection() {
+    this.lastPromptInjection = this._buildStandardInjection();
+    return this.lastPromptInjection;
+  }
+
+  /**
+   * Async version for manual rebuilds (e.g., after settings change)
+   */
+  async rebuildInjectionAsync() {
+    const msgCount = this.db.getMessageCount();
+
+    if (this.settings.enablePlotMemory && this.plotGenerator) {
+      // Plot Memory Mode
+      try {
+        // Use general keywords for broad context
+        const recentEpisodes = this.db.all(
+          'SELECT * FROM episodes ORDER BY timestamp DESC LIMIT 5'
+        );
+        const keywords = [];
+        for (const ep of recentEpisodes) {
+          const epKeywords = JSON.parse(ep.keywords || '[]');
+          keywords.push(...epKeywords);
+        }
+        // Deduplicate
+        const uniqueKeywords = [...new Set(keywords)].slice(0, 10);
+
+        this.lastPromptInjection = await this.plotGenerator.generatePlot(
+          uniqueKeywords,
+          msgCount,
+          this.settings.plotMemoryOptions
+        );
+      } catch (error) {
+        console.error('[NeuroCore] Plot rebuild failed, using standard:', error);
+        this.lastPromptInjection = this._buildStandardInjection();
+      }
+    } else {
+      // Standard Mode
+      this.lastPromptInjection = this._buildStandardInjection();
+    }
+
+    return this.lastPromptInjection;
+  }
+
+  /**
+   * Builds standard PFC-based injection (non-plot mode)
+   */
+  _buildStandardInjection() {
     // Get recent episodes (most recent by timestamp, no keyword filter)
     const episodes = this.db.all(
       'SELECT * FROM episodes ORDER BY timestamp DESC LIMIT ?', [20]
@@ -184,14 +278,12 @@ export class NeuroController {
       }
     }
 
-    this.lastPromptInjection = this.pfc.assemblePromptInjection({
+    return this.pfc.assemblePromptInjection({
       episodes: episodes.slice(0, this.settings.maxSlots),
       semanticFacts: allNodes.slice(0, 10),
       patterns: patterns.slice(0, 5),
       emotionalState,
     });
-
-    return this.lastPromptInjection;
   }
 
   getPromptInjection(maxContextTokens = 4096) {
