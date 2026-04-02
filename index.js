@@ -14,6 +14,39 @@ let currentChatId = null;
 let isInitialized = false;
 let dashboardRefreshTimer = null;
 
+// --- Settings Persistence ---
+
+const DEFAULT_EXTENSION_SETTINGS = {
+  maxSlots: 8,
+  tokenBudgetPercent: 15,
+  consolidationInterval: 10,
+  plotModeEnabled: false,
+  plotKeepRecentMessages: 4,
+};
+
+function loadSettings() {
+  const context = SillyTavern.getContext();
+  if (!context.extensionSettings[MODULE_NAME]) {
+    context.extensionSettings[MODULE_NAME] = { ...DEFAULT_EXTENSION_SETTINGS };
+  }
+  const saved = context.extensionSettings[MODULE_NAME];
+  // Apply saved settings to neuro controller
+  Object.assign(neuro.settings, saved);
+  console.log('[NeuroCore] Settings loaded:', saved);
+}
+
+function saveSettings() {
+  const context = SillyTavern.getContext();
+  context.extensionSettings[MODULE_NAME] = {
+    maxSlots: neuro.settings.maxSlots,
+    tokenBudgetPercent: neuro.settings.tokenBudgetPercent,
+    consolidationInterval: neuro.settings.consolidationInterval,
+    plotModeEnabled: neuro.settings.plotModeEnabled,
+    plotKeepRecentMessages: neuro.settings.plotKeepRecentMessages,
+  };
+  context.saveSettingsDebounced();
+}
+
 // --- SillyTavern Extension API ---
 
 async function initExtension() {
@@ -24,6 +57,9 @@ async function initExtension() {
     return;
   }
 
+  // Load persisted settings
+  loadSettings();
+
   // Render settings panel into ST extension area
   await mountDashboard(context);
 
@@ -32,7 +68,7 @@ async function initExtension() {
     currentChatId = chatId;
 
     const llmCallback = createLlmCallback(context);
-    await neuro.initialize(chatId, {}, llmCallback);
+    await neuro.initialize(chatId, neuro.settings, llmCallback);
     isInitialized = true;
 
     // Auto-import existing chat messages into the brain
@@ -281,24 +317,29 @@ function bindDashboardEvents() {
   $(document).on('click', '#neurocore-popup-close', () => $('#neurocore-injection-popup').hide());
   $(document).on('click', '#neurocore-open-explorer', openExplorer);
 
-  // Settings changes
+  // Settings changes — all persist via saveSettings()
   $(document).on('change', '#neurocore-s-slots', function () {
     neuro.settings.maxSlots = parseInt($(this).val()) || 8;
+    saveSettings();
   });
   $(document).on('change', '#neurocore-s-budget', function () {
     neuro.settings.tokenBudgetPercent = parseInt($(this).val()) || 15;
+    saveSettings();
   });
   $(document).on('change', '#neurocore-s-interval', function () {
     neuro.settings.consolidationInterval = parseInt($(this).val()) || 10;
+    saveSettings();
   });
 
   // Plot mode settings
   $(document).on('change', '#neurocore-s-plot-enabled', function () {
     neuro.settings.plotModeEnabled = $(this).is(':checked');
     console.log('[NeuroCore] Plot mode:', neuro.settings.plotModeEnabled ? 'ON' : 'OFF');
+    saveSettings();
   });
   $(document).on('change', '#neurocore-s-plot-keep', function () {
     neuro.settings.plotKeepRecentMessages = parseInt($(this).val()) || 4;
+    saveSettings();
   });
 }
 
