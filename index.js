@@ -780,7 +780,16 @@ async function onMessageReceived(messageIndex) {
     const episodeId = await neuro.processMessage(text, sender, messageIndex, externalId);
     console.log('[NeuroCore] Stored episode:', episodeId);
     messageEpisodeMap.set(messageIndex, episodeId);
-    updateExtensionPrompt();
+
+    // If this is a user message and plot mode is enabled, start context analysis NOW
+    // so it runs in parallel while SillyTavern prepares generation.
+    // The result will be injected in CHAT_COMPLETION_PROMPT_READY.
+    if (msg.is_user && neuro.settings.plotModeEnabled) {
+      startContextAnalysis(text);
+    } else {
+      updateExtensionPrompt();
+    }
+
     refreshDashboard();
   } catch (err) {
     console.error('[NeuroCore] Error processing message:', err);
@@ -911,19 +920,20 @@ function updateExtensionPrompt() {
   }
 }
 
-// Holds the pending context analysis for injection into the prompt
-let pendingContextAnalysis = null;
+// Context analysis: started on user message, result cached for injection during generation
+let contextAnalysisPromise = null; // Promise from the ongoing analysis API call
+let contextAnalysisResult = null;  // Resolved result, ready for synchronous injection
 
 function registerPromptHook(context) {
   const eventSource = context.eventSource;
   const eventTypes = context.eventTypes || context.event_types;
   if (!eventSource || !eventTypes) return;
 
-  // --- Phase 1: Before prompt assembly — process message + generate context analysis ---
-  // This runs when the AI is about to generate a response (not on every user message).
+  // --- Phase 1: GENERATE_BEFORE_COMBINE_PROMPTS ---
+  // Wait for the context analysis to finish (if still running from MESSAGE_RECEIVED).
+  // Also update extension prompt for non-plot mode.
   eventSource.on(eventTypes.GENERATE_BEFORE_COMBINE_PROMPTS, async () => {
     console.log('[NeuroCore] GENERATE_BEFORE_COMBINE_PROMPTS fired');
-    pendingContextAnalysis = null;
 
     // Process the latest user message if not yet processed
     let lastUserMessage = '';
@@ -951,40 +961,42 @@ function registerPromptHook(context) {
       console.warn('[NeuroCore] Pre-generate message processing failed:', err);
     }
 
-    // Generate context analysis if plot mode is enabled
     if (neuro.settings.plotModeEnabled && neuro.plotGenerator) {
-      try {
-        console.log('[NeuroCore] Plot mode active — generating context analysis...');
-        console.log('[NeuroCore] plotGenerator exists:', !!neuro.plotGenerator);
-        console.log('[NeuroCore] generatePlot callback exists:', !!neuro.plotGenerator.generatePlot);
-        const contextInjection = await neuro.plotGenerator.generate(lastUserMessage);
-        if (contextInjection) {
-          pendingContextAnalysis = contextInjection;
-          console.log('[NeuroCore] Context analysis ready for injection, length:', contextInjection.length);
-        } else {
-          console.warn('[NeuroCore] Context analysis returned null, using normal injection');
-          updateExtensionPrompt();
+      // If no analysis is running yet (e.g. MESSAGE_RECEIVED didn't trigger), start one now
+      if (!contextAnalysisPromise && !contextAnalysisResult) {
+        console.log('[NeuroCore] No pending analysis — starting one now in GENERATE_BEFORE_COMBINE');
+        startContextAnalysis(lastUserMessage);
+      }
+
+      // Wait for the analysis to complete
+      if (contextAnalysisPromise) {
+        console.log('[NeuroCore] Waiting for context analysis to complete...');
+        try {
+          await contextAnalysisPromise;
+          console.log('[NeuroCore] Context analysis completed, result available:', !!contextAnalysisResult);
+        } catch (err) {
+          console.error('[NeuroCore] Context analysis await failed:', err);
         }
-      } catch (err) {
-        console.error('[NeuroCore] Context analysis failed:', err);
-        updateExtensionPrompt();
       }
     } else {
-      // Normal mode: standard memory injection
-      console.log('[NeuroCore] Plot mode disabled or no plotGenerator, using normal injection');
       updateExtensionPrompt();
     }
   });
 
-  // --- Phase 2: After prompt assembly — inject context analysis into chat array ---
-  // This fires synchronously with the assembled chat array, so injection is guaranteed.
+  // --- Phase 2: CHAT_COMPLETION_PROMPT_READY ---
+  // Synchronously inject the cached context analysis into the chat array.
   eventSource.on(eventTypes.CHAT_COMPLETION_PROMPT_READY, (eventData) => {
-    if (!neuro.settings.plotModeEnabled || !pendingContextAnalysis || eventData.dryRun) return;
+    if (!neuro.settings.plotModeEnabled || eventData.dryRun) return;
 
     const chat = eventData.chat;
     if (!chat || !Array.isArray(chat)) return;
 
-    console.log('[NeuroCore] CHAT_COMPLETION_PROMPT_READY — injecting context analysis');
+    if (!contextAnalysisResult) {
+      console.log('[NeuroCore] PROMPT_READY — no context analysis available, skipping injection');
+      return;
+    }
+
+    console.log('[NeuroCore] PROMPT_READY — injecting context analysis');
 
     // Find insertion point: after system messages, before chat history
     let insertAt = 0;
@@ -998,16 +1010,44 @@ function registerPromptHook(context) {
     // Inject context analysis as system message — chat history stays intact
     chat.splice(insertAt, 0, {
       role: 'system',
-      content: pendingContextAnalysis,
+      content: contextAnalysisResult,
     });
 
     console.log('[NeuroCore] Context analysis injected at position', insertAt,
-      'length:', pendingContextAnalysis.length, 'chars. Total chat messages:', chat.length);
+      'length:', contextAnalysisResult.length, 'chars. Total chat messages:', chat.length);
 
-    pendingContextAnalysis = null;
+    // Clear after injection
+    contextAnalysisResult = null;
+    contextAnalysisPromise = null;
   });
 
   console.log('[NeuroCore] Prompt hooks registered (GENERATE_BEFORE_COMBINE_PROMPTS + CHAT_COMPLETION_PROMPT_READY)');
+}
+
+/**
+ * Start the context analysis API call. Called from onMessageReceived (user messages)
+ * so the API call runs in parallel while SillyTavern prepares the generation.
+ */
+function startContextAnalysis(userMessage) {
+  if (!neuro.settings.plotModeEnabled || !neuro.plotGenerator) return;
+
+  console.log('[NeuroCore] Starting context analysis for:', userMessage?.slice(0, 80));
+  contextAnalysisResult = null;
+
+  contextAnalysisPromise = neuro.plotGenerator.generate(userMessage)
+    .then((result) => {
+      if (result) {
+        contextAnalysisResult = result;
+        console.log('[NeuroCore] Context analysis completed, length:', result.length);
+      } else {
+        console.warn('[NeuroCore] Context analysis returned null');
+        updateExtensionPrompt();
+      }
+    })
+    .catch((err) => {
+      console.error('[NeuroCore] Context analysis failed:', err);
+      updateExtensionPrompt();
+    });
 }
 
 function escapeHtml(text) {
