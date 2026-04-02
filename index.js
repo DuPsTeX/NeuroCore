@@ -735,6 +735,9 @@ async function onChatChanged() {
     currentChatId = newChatId;
     messageEpisodeMap.clear();
 
+    // Restore persisted settings before switching chat
+    loadSettings();
+
     const llmCallback = createLlmCallback(context);
     await neuro.switchChat(newChatId, llmCallback);
     isInitialized = true;
