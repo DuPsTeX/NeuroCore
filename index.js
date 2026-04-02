@@ -16,12 +16,52 @@ let dashboardRefreshTimer = null;
 
 // --- Settings Persistence ---
 
+const DEFAULT_PLOT_PROMPT = `Du bist ein Kontext-Analyst für ein Rollenspiel. Analysiere die folgenden Gehirn-Daten und erstelle eine strukturierte Kontext-Zusammenfassung, die einer KI hilft die aktuelle Situation zu verstehen und passend zu antworten.
+
+Die letzte Nachricht des Spielers war: "{{lastMessage}}"
+
+ERSTELLE FOLGENDE ABSCHNITTE:
+
+## WORUM GEHT ES GERADE
+Beschreibe in 2-3 Sätzen was gerade in der Szene passiert und worauf die letzte Spieler-Nachricht abzielt.
+
+## INVOLVIERTE PERSONEN
+Liste alle aktuell relevanten Charaktere auf mit:
+- Name und Rolle in der aktuellen Szene
+- Wichtige Eigenschaften (Aussehen, Persönlichkeit, Beziehungen)
+- Aktuelle Stimmung/Haltung wenn erkennbar
+
+## ZUSAMMENFASSUNG DER LETZTEN EREIGNISSE
+Fasse die letzten Gespräche und Ereignisse chronologisch zusammen (kurz und prägnant, max 5-8 Sätze).
+
+## WICHTIGE VERBINDUNGEN & HINTERGRUND
+Relevante Fakten aus der Geschichte die für die aktuelle Situation wichtig sind:
+- Beziehungen zwischen Charakteren
+- Vergangene Ereignisse die jetzt relevant sind
+- Orte, Gegenstände oder Umstände die eine Rolle spielen
+
+## AKTUELLE SZENE
+Beschreibe den aktuellen Ort, die Atmosphäre und die unmittelbare Situation in der sich die Charaktere befinden.
+
+REGELN:
+- Schreibe in der Sprache des Rollenspiels
+- Sei präzise und informativ, nicht ausschmückend
+- Fokussiere auf das was die KI wissen MUSS um passend zu antworten
+- Wenn Informationen fehlen, lass den Abschnitt weg statt zu raten
+
+GEHIRN-DATEN:
+{{brainData}}
+
+Schreibe NUR die Kontext-Analyse, keine Meta-Kommentare:`;
+
 const DEFAULT_EXTENSION_SETTINGS = {
   maxSlots: 8,
   tokenBudgetPercent: 15,
   consolidationInterval: 10,
   plotModeEnabled: false,
   plotKeepRecentMessages: 4,
+  plotCustomPrompt: '',
+  plotMaxTokens: 4000,
 };
 
 function loadSettings() {
@@ -43,6 +83,8 @@ function saveSettings() {
     consolidationInterval: neuro.settings.consolidationInterval,
     plotModeEnabled: neuro.settings.plotModeEnabled,
     plotKeepRecentMessages: neuro.settings.plotKeepRecentMessages,
+    plotCustomPrompt: neuro.settings.plotCustomPrompt,
+    plotMaxTokens: neuro.settings.plotMaxTokens,
   };
   context.saveSettingsDebounced();
 }
@@ -68,7 +110,8 @@ async function initExtension() {
   $('#neurocore-s-budget').val(neuro.settings.tokenBudgetPercent);
   $('#neurocore-s-interval').val(neuro.settings.consolidationInterval);
   $('#neurocore-s-plot-enabled').prop('checked', neuro.settings.plotModeEnabled);
-  $('#neurocore-s-plot-keep').val(neuro.settings.plotKeepRecentMessages);
+  $('#neurocore-s-plot-tokens').val(neuro.settings.plotMaxTokens);
+  $('#neurocore-s-plot-prompt').val(neuro.settings.plotCustomPrompt || '');
 
   const chatId = getChatId(context);
   if (chatId) {
@@ -127,10 +170,10 @@ window.addEventListener?.('error', (e) => {
 });
 
 function createLlmCallback(context) {
-  return async (prompt) => {
+  return async (prompt, maxTokens) => {
     // Try direct lightweight API call first (no system prompt overhead)
     try {
-      const result = await directLlmCall(prompt);
+      const result = await directLlmCall(prompt, maxTokens);
       if (result) return result;
     } catch (err) {
       console.warn('[NeuroCore] Direct API call failed, falling back to generateQuietPrompt:', err.message);
@@ -180,7 +223,7 @@ const SOURCE_MODEL_MAP = {
  * without the full system prompt, character sheet, lorebook etc.
  * Saves massive amounts of tokens on every consolidation call.
  */
-async function directLlmCall(prompt) {
+async function directLlmCall(prompt, maxTokens) {
   const ctx = SillyTavern.getContext();
   const mainApi = ctx.mainApi;
 
@@ -218,7 +261,7 @@ async function directLlmCall(prompt) {
     messages,
     model,
     temperature: isReasoner ? undefined : 0.3,
-    max_tokens: isReasoner ? 8000 : 4000,
+    max_tokens: isReasoner ? 8000 : (maxTokens || 4000),
     chat_completion_source: source,
     stream: false,
   };
@@ -344,9 +387,19 @@ function bindDashboardEvents() {
     console.log('[NeuroCore] Plot mode:', neuro.settings.plotModeEnabled ? 'ON' : 'OFF');
     saveSettings();
   });
-  $(document).on('change', '#neurocore-s-plot-keep', function () {
-    neuro.settings.plotKeepRecentMessages = parseInt($(this).val()) || 4;
+  $(document).on('change', '#neurocore-s-plot-tokens', function () {
+    neuro.settings.plotMaxTokens = parseInt($(this).val()) || 4000;
     saveSettings();
+  });
+  $(document).on('change', '#neurocore-s-plot-prompt', function () {
+    neuro.settings.plotCustomPrompt = $(this).val().trim();
+    saveSettings();
+  });
+  $(document).on('click', '#neurocore-s-plot-prompt-reset', function () {
+    neuro.settings.plotCustomPrompt = '';
+    $('#neurocore-s-plot-prompt').val('');
+    saveSettings();
+    console.log('[NeuroCore] Plot prompt reset to default');
   });
 }
 
@@ -382,7 +435,8 @@ function refreshDashboard() {
   $('#neurocore-s-budget').val(neuro.settings.tokenBudgetPercent);
   $('#neurocore-s-interval').val(neuro.settings.consolidationInterval);
   $('#neurocore-s-plot-enabled').prop('checked', neuro.settings.plotModeEnabled);
-  $('#neurocore-s-plot-keep').val(neuro.settings.plotKeepRecentMessages);
+  $('#neurocore-s-plot-tokens').val(neuro.settings.plotMaxTokens);
+  $('#neurocore-s-plot-prompt').val(neuro.settings.plotCustomPrompt || '');
 
 
   // Render active tab
@@ -674,14 +728,14 @@ function onShowInjection() {
   const popup = $('#neurocore-injection-popup');
 
   if (neuro.settings.plotModeEnabled && neuro.plotGenerator?.lastPlot) {
-    // Plot mode: show the generated plot
+    // Plot mode: show the generated context analysis
     const plotText = neuro.plotGenerator.lastPlot;
     const tokens = neuro.pfc.estimateTokens(plotText);
     container.text(plotText);
     meta.html(
-      `<span style="color: #4fc3f7;">PLOT-MODUS AKTIV</span>` +
-      `<span>~${tokens} Tokens (Plot)</span>` +
-      `<span>Letzte ${neuro.settings.plotKeepRecentMessages} echte Nachrichten werden beibehalten</span>`
+      `<span style="color: #4fc3f7;">PLOT-MODUS AKTIV (Kontext-Analyse)</span>` +
+      `<span>~${tokens} Tokens (Analyse)</span>` +
+      `<span>Kontext wird als zusätzliches Wissen injiziert — volle Chat-Historie bleibt erhalten</span>`
     );
   } else {
     // Normal mode: show memory injection
@@ -857,8 +911,7 @@ function updateExtensionPrompt() {
   }
 }
 
-// Holds the generated plot messages for injection into chat completion
-let pendingPlotMessages = null;
+// Plot mode now uses setExtensionPrompt for context injection (no pending messages needed)
 
 function registerPromptHook(context) {
   const eventSource = context.eventSource;
@@ -868,7 +921,6 @@ function registerPromptHook(context) {
   // --- Phase 1: Before prompt assembly — process message + generate plot ---
   eventSource.on(eventTypes.GENERATE_BEFORE_COMBINE_PROMPTS, async () => {
     console.log('[NeuroCore] GENERATE_BEFORE_COMBINE_PROMPTS fired');
-    pendingPlotMessages = null;
 
     // Process the latest user message if not yet processed
     let lastUserMessage = '';
@@ -896,87 +948,34 @@ function registerPromptHook(context) {
       console.warn('[NeuroCore] Pre-generate message processing failed:', err);
     }
 
-    // Generate plot if plot mode is enabled
+    // Generate context analysis if plot mode is enabled
     if (neuro.settings.plotModeEnabled && neuro.plotGenerator) {
       try {
-        console.log('[NeuroCore] Plot mode active — generating plot summary...');
-        pendingPlotMessages = await neuro.plotGenerator.generate(lastUserMessage);
-        if (pendingPlotMessages) {
-          console.log('[NeuroCore] Plot generated, messages:', pendingPlotMessages.length);
+        console.log('[NeuroCore] Plot mode active — generating context analysis...');
+        const contextInjection = await neuro.plotGenerator.generate(lastUserMessage);
+        if (contextInjection) {
+          // Inject the context analysis as extension prompt alongside the chat history
+          const ctx = SillyTavern.getContext();
+          ctx.setExtensionPrompt(MODULE_NAME, contextInjection, 1, 0);
+          console.log('[NeuroCore] Context analysis injected, length:', contextInjection.length);
+        } else {
+          // Fallback to normal memory injection
+          updateExtensionPrompt();
         }
       } catch (err) {
-        console.error('[NeuroCore] Plot generation failed:', err);
+        console.error('[NeuroCore] Context analysis failed:', err);
+        updateExtensionPrompt();
       }
-    }
-
-    // Update extension prompt (for non-plot injection or fallback)
-    if (!neuro.settings.plotModeEnabled) {
+    } else {
+      // Normal mode: standard memory injection
       updateExtensionPrompt();
     }
   });
 
-  // --- Phase 2: After prompt assembly — replace history with plot ---
-  eventSource.on(eventTypes.CHAT_COMPLETION_PROMPT_READY, (eventData) => {
-    if (!neuro.settings.plotModeEnabled || !pendingPlotMessages || eventData.dryRun) return;
-
-    const chat = eventData.chat;
-    if (!chat || !Array.isArray(chat)) return;
-
-    console.log('[NeuroCore] CHAT_COMPLETION_PROMPT_READY — replacing history with plot');
-    console.log('[NeuroCore] Original chat messages:', chat.length);
-
-    // Identify which messages are "history" (user/assistant role, not system)
-    // Keep: system messages (character card, jailbreak, extensions) + last N user/assistant
-    const keepRecent = neuro.settings.plotKeepRecentMessages || 4;
-
-    // Find all user/assistant message indices
-    const historyIndices = [];
-    for (let i = 0; i < chat.length; i++) {
-      if (chat[i].role === 'user' || chat[i].role === 'assistant') {
-        historyIndices.push(i);
-      }
-    }
-
-    // Keep the last N history messages, remove the rest
-    const toKeep = new Set(historyIndices.slice(-keepRecent));
-    const toRemove = historyIndices.filter(i => !toKeep.has(i));
-
-    if (toRemove.length === 0) {
-      console.log('[NeuroCore] Not enough history to replace, skipping plot injection');
-      return;
-    }
-
-    // Find where to insert the plot (before the first kept message)
-    const firstKeptIdx = historyIndices.length > keepRecent
-      ? historyIndices[historyIndices.length - keepRecent]
-      : historyIndices[0];
-
-    // Remove old history messages (from end to start to preserve indices)
-    for (let i = toRemove.length - 1; i >= 0; i--) {
-      chat.splice(toRemove[i], 1);
-    }
-
-    // Find the new insertion point (after system messages, before kept history)
-    let insertAt = 0;
-    for (let i = 0; i < chat.length; i++) {
-      if (chat[i].role === 'user' || chat[i].role === 'assistant') {
-        insertAt = i;
-        break;
-      }
-    }
-
-    // Insert plot messages
-    for (let i = pendingPlotMessages.length - 1; i >= 0; i--) {
-      chat.splice(insertAt, 0, pendingPlotMessages[i]);
-    }
-
-    console.log('[NeuroCore] History replaced. Removed:', toRemove.length,
-      'messages. Kept:', keepRecent, 'recent. Injected:', pendingPlotMessages.length,
-      'plot messages. Final chat:', chat.length);
-
-    // Clear pending
-    pendingPlotMessages = null;
-  });
+  // --- Phase 2: Plot mode now uses extension prompt injection (setExtensionPrompt) ---
+  // The context analysis is injected in Phase 1 via setExtensionPrompt,
+  // so the full chat history is preserved and the AI gets both the
+  // context analysis AND the real conversation messages.
 
   console.log('[NeuroCore] Prompt hooks registered (GENERATE_BEFORE_COMBINE_PROMPTS + CHAT_COMPLETION_PROMPT_READY)');
 }

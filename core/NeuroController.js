@@ -20,7 +20,9 @@ const DEFAULT_SETTINGS = {
   consolidationInterval: 10,
   inactivityTimeoutMs: 5 * 60 * 1000,
   plotModeEnabled: false,
-  plotKeepRecentMessages: 4, // Keep last N real messages alongside the plot
+  plotKeepRecentMessages: 4,
+  plotCustomPrompt: '',
+  plotMaxTokens: 4000,
 };
 
 export class NeuroController {
@@ -71,6 +73,7 @@ export class NeuroController {
       pfc: this.pfc,
       generatePlot: llmCallback,
     });
+    this.plotGenerator.settings = this.settings;
 
     this._resetInactivityTimer();
   }

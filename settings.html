@@ -69,24 +69,39 @@
                     </label>
 
                     <hr style="margin: 8px 0; border-color: var(--SmartThemeBorderColor);">
-                    <div style="font-weight: bold; margin-bottom: 4px;">Plot-Modus (ersetzt Chat-History)</div>
+                    <div style="font-weight: bold; margin-bottom: 4px;">Plot-Modus (Kontext-Analyse)</div>
 
                     <label class="checkbox_label" style="display: flex; align-items: center; gap: 8px;">
                         <input type="checkbox" id="neurocore-s-plot-enabled">
                         <span>Plot-Modus aktivieren</span>
                     </label>
                     <small style="opacity: 0.7; display: block; margin-bottom: 6px;">
-                        Ersetzt die komplette Chat-History durch eine KI-generierte Plot-Zusammenfassung.
-                        Spart massiv Tokens bei langen Chats.
+                        Vor jeder Antwort wird eine Kontext-Analyse erstellt (Situation, Personen, Geschichte)
+                        und als zusätzliches Wissen an die KI geschickt. Die Chat-Historie bleibt vollständig erhalten.
                     </small>
 
                     <label>
-                        <span>Letzte echte Nachrichten behalten</span>
-                        <input type="number" id="neurocore-s-plot-keep" value="4" min="2" max="20" class="text_pole">
+                        <span>Max Tokens für Analyse</span>
+                        <input type="number" id="neurocore-s-plot-tokens" value="4000" min="500" max="16000" step="500" class="text_pole">
                     </label>
                     <small style="opacity: 0.7; display: block; margin-bottom: 6px;">
-                        Anzahl der letzten echten Chat-Nachrichten die neben dem Plot beibehalten werden.
+                        Maximale Token-Anzahl für den Analyse-API-Call. Höhere Werte = detailliertere Analyse, aber mehr Kosten.
                     </small>
+
+                    <label>
+                        <span>Analyse-Prompt anpassen</span>
+                    </label>
+                    <small style="opacity: 0.7; display: block; margin-bottom: 4px;">
+                        Eigenen Prompt für die Kontext-Analyse definieren. Verfügbare Platzhalter:<br>
+                        <code>{{lastMessage}}</code> — letzte Spieler-Nachricht<br>
+                        <code>{{brainData}}</code> — gesammelte Gehirn-Daten (Charaktere, Orte, Episoden etc.)
+                    </small>
+                    <textarea id="neurocore-s-plot-prompt" class="text_pole" rows="8" style="width: 100%; font-size: 12px; font-family: monospace; resize: vertical;" placeholder="Leer lassen für Standard-Prompt..."></textarea>
+                    <div style="display: flex; gap: 4px; margin-top: 4px;">
+                        <button class="menu_button" id="neurocore-s-plot-prompt-reset" style="font-size: 11px;">
+                            <i class="fa-solid fa-rotate-left"></i> Standard wiederherstellen
+                        </button>
+                    </div>
                 </div>
             </div>
 

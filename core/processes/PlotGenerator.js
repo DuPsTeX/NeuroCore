@@ -1,5 +1,5 @@
-// core/processes/PlotGenerator.js — Generates plot summaries from brain memory
-// Replaces chat history with a condensed narrative context
+// core/processes/PlotGenerator.js — Generates context analysis from brain memory
+// Analyzes current situation, involved characters, and story connections for AI context
 
 export class PlotGenerator {
   constructor({ db, hippocampus, temporal, cerebellum, basalGanglia, amygdala, pfc, generatePlot = null }) {
@@ -11,14 +11,15 @@ export class PlotGenerator {
     this.amygdala = amygdala;
     this.pfc = pfc;
     this.generatePlot = generatePlot; // LLM callback for plot generation
+    this.settings = null; // Reference to neuro.settings (set externally)
     this.lastPlot = '';
     this.lastPlotTimestamp = 0;
     this.plotCacheDuration = 0; // 0 = regenerate every time
   }
 
   /**
-   * Generate a plot summary from brain memory, tailored to the current user message.
-   * Returns an array of {role, content} messages to inject as fake history.
+   * Generate a context analysis from brain memory, tailored to the current user message.
+   * Returns a formatted injection string for use with setExtensionPrompt.
    */
   async generate(currentUserMessage) {
     if (!this.generatePlot || !this.db) return null;
@@ -30,23 +31,24 @@ export class PlotGenerator {
       // 2. Build the plot generation prompt
       const prompt = this._buildPlotPrompt(context, currentUserMessage);
 
-      // 3. Call LLM to generate the plot
-      console.log('[NeuroCore PlotGen] Generating plot summary...');
-      const plotText = await this.generatePlot(prompt);
+      // 3. Call LLM to generate the context analysis
+      const maxTokens = this.settings?.plotMaxTokens || 4000;
+      console.log('[NeuroCore PlotGen] Generating context analysis (max tokens:', maxTokens, ')...');
+      const plotText = await this.generatePlot(prompt, maxTokens);
 
       if (!plotText) {
         console.warn('[NeuroCore PlotGen] LLM returned empty plot');
         return null;
       }
 
-      // 4. Clean up the plot text
+      // 4. Clean up the analysis text
       this.lastPlot = this._cleanPlot(plotText);
       this.lastPlotTimestamp = Date.now();
 
-      console.log('[NeuroCore PlotGen] Plot generated, length:', this.lastPlot.length, 'chars');
+      console.log('[NeuroCore PlotGen] Context analysis generated, length:', this.lastPlot.length, 'chars');
 
-      // 5. Format as history messages
-      return this._formatAsHistory(this.lastPlot);
+      // 5. Format as injection string
+      return this._formatAsInjection(this.lastPlot);
     } catch (err) {
       console.error('[NeuroCore PlotGen] Plot generation failed:', err);
       return null;
@@ -203,22 +205,52 @@ export class PlotGenerator {
 
     const contextBlock = sections.join('\n');
 
-    return `Du bist ein Plot-Zusammenfasser für ein Rollenspiel. Erstelle aus den folgenden Gehirn-Daten eine zusammenhängende Plot-Zusammenfassung.
+    // Use custom prompt if set, otherwise use the default from index.js
+    const customPrompt = this.settings?.plotCustomPrompt;
+    if (customPrompt) {
+      return customPrompt
+        .replace(/\{\{lastMessage\}\}/g, currentMessage || '(unbekannt)')
+        .replace(/\{\{brainData\}\}/g, contextBlock);
+    }
+
+    // Default prompt (also exported as DEFAULT_PLOT_PROMPT in index.js)
+    return `Du bist ein Kontext-Analyst für ein Rollenspiel. Analysiere die folgenden Gehirn-Daten und erstelle eine strukturierte Kontext-Zusammenfassung, die einer KI hilft die aktuelle Situation zu verstehen und passend zu antworten.
+
+Die letzte Nachricht des Spielers war: "${currentMessage || '(unbekannt)'}"
+
+ERSTELLE FOLGENDE ABSCHNITTE:
+
+## WORUM GEHT ES GERADE
+Beschreibe in 2-3 Sätzen was gerade in der Szene passiert und worauf die letzte Spieler-Nachricht abzielt.
+
+## INVOLVIERTE PERSONEN
+Liste alle aktuell relevanten Charaktere auf mit:
+- Name und Rolle in der aktuellen Szene
+- Wichtige Eigenschaften (Aussehen, Persönlichkeit, Beziehungen)
+- Aktuelle Stimmung/Haltung wenn erkennbar
+
+## ZUSAMMENFASSUNG DER LETZTEN EREIGNISSE
+Fasse die letzten Gespräche und Ereignisse chronologisch zusammen (kurz und prägnant, max 5-8 Sätze).
+
+## WICHTIGE VERBINDUNGEN & HINTERGRUND
+Relevante Fakten aus der Geschichte die für die aktuelle Situation wichtig sind:
+- Beziehungen zwischen Charakteren
+- Vergangene Ereignisse die jetzt relevant sind
+- Orte, Gegenstände oder Umstände die eine Rolle spielen
+
+## AKTUELLE SZENE
+Beschreibe den aktuellen Ort, die Atmosphäre und die unmittelbare Situation in der sich die Charaktere befinden.
 
 REGELN:
-1. Schreibe eine NARRATIVE Zusammenfassung der bisherigen Geschichte (nicht als Aufzählung!)
-2. Beschreibe die aktuelle Situation, den Ort, und was zuletzt passiert ist
-3. Erwähne alle wichtigen Charaktere mit ihren relevanten Details (Aussehen, Rolle, Beziehungen)
-4. Halte die Zusammenfassung in der Sprache des Rollenspiels (gleicher Stil, gleiche Perspektive)
-5. Die Zusammenfassung soll 500-1500 Wörter lang sein — lang genug für vollen Kontext
-6. Fokussiere auf die AKTUELLE SITUATION und WAS ALS NÄCHSTES RELEVANT IST
-7. Erwähne vergangene Ereignisse nur wenn sie für die aktuelle Situation relevant sind
-8. Die letzte Nachricht des Spielers war: "${currentMessage || '(unbekannt)'}" — stelle sicher dass der Kontext dafür gegeben ist
+- Schreibe in der Sprache des Rollenspiels
+- Sei präzise und informativ, nicht ausschmückend
+- Fokussiere auf das was die KI wissen MUSS um passend zu antworten
+- Wenn Informationen fehlen, lass den Abschnitt weg statt zu raten
 
 GEHIRN-DATEN:
 ${contextBlock}
 
-Schreibe NUR die Plot-Zusammenfassung, keine Erklärungen oder Meta-Kommentare:`;
+Schreibe NUR die Kontext-Analyse, keine Meta-Kommentare:`;
   }
 
   /**
@@ -227,25 +259,19 @@ Schreibe NUR die Plot-Zusammenfassung, keine Erklärungen oder Meta-Kommentare:`
   _cleanPlot(text) {
     // Remove any meta-commentary the LLM might add
     let clean = text
-      .replace(/^(Hier ist|Plot-Zusammenfassung|Zusammenfassung)[:.]?\s*/i, '')
-      .replace(/^#+\s+Plot.*\n/i, '')
+      .replace(/^(Hier ist|Plot-Zusammenfassung|Zusammenfassung|Kontext-Analyse|Analyse)[:.]?\s*/i, '')
+      .replace(/^#+\s+(Plot|Kontext).*\n/i, '')
       .trim();
 
     return clean;
   }
 
   /**
-   * Format the plot as chat history messages.
-   * Returns array of {role, content} for injection into ST's chat array.
+   * Format the analysis as a system context injection string.
+   * Returns the formatted text for use with setExtensionPrompt.
    */
-  _formatAsHistory(plotText) {
-    // Single assistant message containing the plot as narrative context
-    return [
-      {
-        role: 'system',
-        content: `[NeuroCore Plot-Erinnerung — Dies ist eine Zusammenfassung der bisherigen Geschichte. Nutze diese als Kontext für deine nächste Antwort.]\n\n${plotText}`,
-      },
-    ];
+  _formatAsInjection(plotText) {
+    return `[NeuroCore Kontext-Analyse — Nutze die folgenden Informationen als Hintergrundwissen für deine nächste Antwort. Antworte natürlich im Rollenspiel-Stil, nicht als Zusammenfassung.]\n\n${plotText}`;
   }
 
   /**
