@@ -63,6 +63,13 @@ async function initExtension() {
   // Render settings panel into ST extension area
   await mountDashboard(context);
 
+  // Apply loaded settings to UI immediately (before DB is ready)
+  $('#neurocore-s-slots').val(neuro.settings.maxSlots);
+  $('#neurocore-s-budget').val(neuro.settings.tokenBudgetPercent);
+  $('#neurocore-s-interval').val(neuro.settings.consolidationInterval);
+  $('#neurocore-s-plot-enabled').prop('checked', neuro.settings.plotModeEnabled);
+  $('#neurocore-s-plot-keep').val(neuro.settings.plotKeepRecentMessages);
+
   const chatId = getChatId(context);
   if (chatId) {
     currentChatId = chatId;
