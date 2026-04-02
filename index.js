@@ -911,16 +911,19 @@ function updateExtensionPrompt() {
   }
 }
 
-// Plot mode now uses setExtensionPrompt for context injection (no pending messages needed)
+// Holds the pending context analysis for injection into the prompt
+let pendingContextAnalysis = null;
 
 function registerPromptHook(context) {
   const eventSource = context.eventSource;
   const eventTypes = context.eventTypes || context.event_types;
   if (!eventSource || !eventTypes) return;
 
-  // --- Phase 1: Before prompt assembly — process message + generate plot ---
+  // --- Phase 1: Before prompt assembly — process message + generate context analysis ---
+  // This runs when the AI is about to generate a response (not on every user message).
   eventSource.on(eventTypes.GENERATE_BEFORE_COMBINE_PROMPTS, async () => {
     console.log('[NeuroCore] GENERATE_BEFORE_COMBINE_PROMPTS fired');
+    pendingContextAnalysis = null;
 
     // Process the latest user message if not yet processed
     let lastUserMessage = '';
@@ -952,14 +955,14 @@ function registerPromptHook(context) {
     if (neuro.settings.plotModeEnabled && neuro.plotGenerator) {
       try {
         console.log('[NeuroCore] Plot mode active — generating context analysis...');
+        console.log('[NeuroCore] plotGenerator exists:', !!neuro.plotGenerator);
+        console.log('[NeuroCore] generatePlot callback exists:', !!neuro.plotGenerator.generatePlot);
         const contextInjection = await neuro.plotGenerator.generate(lastUserMessage);
         if (contextInjection) {
-          // Inject the context analysis as extension prompt alongside the chat history
-          const ctx = SillyTavern.getContext();
-          ctx.setExtensionPrompt(MODULE_NAME, contextInjection, 1, 0);
-          console.log('[NeuroCore] Context analysis injected, length:', contextInjection.length);
+          pendingContextAnalysis = contextInjection;
+          console.log('[NeuroCore] Context analysis ready for injection, length:', contextInjection.length);
         } else {
-          // Fallback to normal memory injection
+          console.warn('[NeuroCore] Context analysis returned null, using normal injection');
           updateExtensionPrompt();
         }
       } catch (err) {
@@ -968,14 +971,41 @@ function registerPromptHook(context) {
       }
     } else {
       // Normal mode: standard memory injection
+      console.log('[NeuroCore] Plot mode disabled or no plotGenerator, using normal injection');
       updateExtensionPrompt();
     }
   });
 
-  // --- Phase 2: Plot mode now uses extension prompt injection (setExtensionPrompt) ---
-  // The context analysis is injected in Phase 1 via setExtensionPrompt,
-  // so the full chat history is preserved and the AI gets both the
-  // context analysis AND the real conversation messages.
+  // --- Phase 2: After prompt assembly — inject context analysis into chat array ---
+  // This fires synchronously with the assembled chat array, so injection is guaranteed.
+  eventSource.on(eventTypes.CHAT_COMPLETION_PROMPT_READY, (eventData) => {
+    if (!neuro.settings.plotModeEnabled || !pendingContextAnalysis || eventData.dryRun) return;
+
+    const chat = eventData.chat;
+    if (!chat || !Array.isArray(chat)) return;
+
+    console.log('[NeuroCore] CHAT_COMPLETION_PROMPT_READY — injecting context analysis');
+
+    // Find insertion point: after system messages, before chat history
+    let insertAt = 0;
+    for (let i = 0; i < chat.length; i++) {
+      if (chat[i].role === 'user' || chat[i].role === 'assistant') {
+        insertAt = i;
+        break;
+      }
+    }
+
+    // Inject context analysis as system message — chat history stays intact
+    chat.splice(insertAt, 0, {
+      role: 'system',
+      content: pendingContextAnalysis,
+    });
+
+    console.log('[NeuroCore] Context analysis injected at position', insertAt,
+      'length:', pendingContextAnalysis.length, 'chars. Total chat messages:', chat.length);
+
+    pendingContextAnalysis = null;
+  });
 
   console.log('[NeuroCore] Prompt hooks registered (GENERATE_BEFORE_COMBINE_PROMPTS + CHAT_COMPLETION_PROMPT_READY)');
 }
