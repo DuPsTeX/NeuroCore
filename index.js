@@ -368,6 +368,8 @@ function refreshDashboard() {
   $('#neurocore-s-slots').val(neuro.settings.maxSlots);
   $('#neurocore-s-budget').val(neuro.settings.tokenBudgetPercent);
   $('#neurocore-s-interval').val(neuro.settings.consolidationInterval);
+  $('#neurocore-s-plot-enabled').prop('checked', neuro.settings.plotModeEnabled);
+  $('#neurocore-s-plot-keep').val(neuro.settings.plotKeepRecentMessages);
 
   // Update Plot Memory settings
   $('#neurocore-s-enable-plot').prop('checked', neuro.settings.enablePlotMemory);
@@ -661,10 +663,8 @@ async function onConsolidate() {
 }
 
 function onShowInjection() {
-  // Show what will ACTUALLY be sent to the AI (with token budget applied)
   const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext() : null;
   const maxCtx = ctx?.maxContext || 4096;
-  const injection = neuro.getPromptInjection(maxCtx);
   const container = $('#neurocore-injection-content');
   const meta = $('#neurocore-popup-meta');
   const popup = $('#neurocore-injection-popup');
@@ -688,6 +688,23 @@ function onShowInjection() {
       `<span>Budget: ${budget} / ${maxCtx} (${neuro.settings.tokenBudgetPercent}%)</span>` +
       `<span>Slots: ${neuro.settings.maxSlots}</span>`
     );
+  } else {
+    // Normal mode: show memory injection
+    const injection = neuro.getPromptInjection(maxCtx);
+    if (!injection.trim()) {
+      container.text('(Noch kein Memory-Prompt generiert. Sende zuerst eine Nachricht.)');
+      meta.html('');
+    } else {
+      container.text(injection);
+      const tokens = neuro.pfc.estimateTokens(injection);
+      const rawTokens = neuro.pfc.estimateTokens(neuro.lastPromptInjection || '');
+      const budget = Math.floor(maxCtx * (neuro.settings.tokenBudgetPercent / 100));
+      meta.html(
+        `<span>~${tokens} Tokens (roh: ~${rawTokens})</span>` +
+        `<span>Budget: ${budget} / ${maxCtx} (${neuro.settings.tokenBudgetPercent}%)</span>` +
+        `<span>Slots: ${neuro.settings.maxSlots}</span>`
+      );
+    }
   }
 
   popup.toggle();
@@ -842,45 +859,128 @@ function updateExtensionPrompt() {
   }
 }
 
+// Holds the generated plot messages for injection into chat completion
+let pendingPlotMessages = null;
+
 function registerPromptHook(context) {
   const eventSource = context.eventSource;
   const eventTypes = context.eventTypes || context.event_types;
-  if (eventSource && eventTypes) {
-    // Listen for the generate event to ensure prompt is fresh
-    eventSource.on(eventTypes.GENERATE_BEFORE_COMBINE_PROMPTS, async () => {
-      console.log('[NeuroCore] GENERATE_BEFORE_COMBINE_PROMPTS fired');
+  if (!eventSource || !eventTypes) return;
 
-      // Process the latest user message if not yet processed
-      try {
-        const ctx = SillyTavern.getContext();
-        const chat = ctx.chat;
-        if (chat && chat.length > 0) {
-          // Find the last user message
-          for (let i = chat.length - 1; i >= 0; i--) {
-            const msg = chat[i];
-            if (!msg.is_user) continue;
-            const text = msg.mes || '';
-            if (!text.trim()) break;
+  // --- Phase 1: Before prompt assembly — process message + generate plot ---
+  eventSource.on(eventTypes.GENERATE_BEFORE_COMBINE_PROMPTS, async () => {
+    console.log('[NeuroCore] GENERATE_BEFORE_COMBINE_PROMPTS fired');
+    pendingPlotMessages = null;
 
-            const externalId = getMessageExternalId(msg, i);
-            // Only process if not already in DB
-            if (!neuro.hippocampus.hasEpisodeByExternalId(externalId)) {
-              console.log('[NeuroCore] Processing user message before generate, index:', i);
-              const episodeId = await neuro.processMessage(text, 'user', i, externalId);
-              messageEpisodeMap.set(i, episodeId);
-            }
-            break; // Only process the last user message
+    // Process the latest user message if not yet processed
+    let lastUserMessage = '';
+    try {
+      const ctx = SillyTavern.getContext();
+      const chat = ctx.chat;
+      if (chat && chat.length > 0) {
+        for (let i = chat.length - 1; i >= 0; i--) {
+          const msg = chat[i];
+          if (!msg.is_user) continue;
+          const text = msg.mes || '';
+          if (!text.trim()) break;
+
+          lastUserMessage = text;
+          const externalId = getMessageExternalId(msg, i);
+          if (!neuro.hippocampus.hasEpisodeByExternalId(externalId)) {
+            console.log('[NeuroCore] Processing user message before generate, index:', i);
+            const episodeId = await neuro.processMessage(text, 'user', i, externalId);
+            messageEpisodeMap.set(i, episodeId);
           }
+          break;
+        }
+      }
+    } catch (err) {
+      console.warn('[NeuroCore] Pre-generate message processing failed:', err);
+    }
+
+    // Generate plot if plot mode is enabled
+    if (neuro.settings.plotModeEnabled && neuro.plotGenerator) {
+      try {
+        console.log('[NeuroCore] Plot mode active — generating plot summary...');
+        pendingPlotMessages = await neuro.plotGenerator.generate(lastUserMessage);
+        if (pendingPlotMessages) {
+          console.log('[NeuroCore] Plot generated, messages:', pendingPlotMessages.length);
         }
       } catch (err) {
-        console.warn('[NeuroCore] Pre-generate message processing failed:', err);
+        console.error('[NeuroCore] Plot generation failed:', err);
       }
+    }
 
-      // Now update the extension prompt with latest injection
+    // Update extension prompt (for non-plot injection or fallback)
+    if (!neuro.settings.plotModeEnabled) {
       updateExtensionPrompt();
-    });
-    console.log('[NeuroCore] Prompt hook registered on:', eventTypes.GENERATE_BEFORE_COMBINE_PROMPTS);
-  }
+    }
+  });
+
+  // --- Phase 2: After prompt assembly — replace history with plot ---
+  eventSource.on(eventTypes.CHAT_COMPLETION_PROMPT_READY, (eventData) => {
+    if (!neuro.settings.plotModeEnabled || !pendingPlotMessages || eventData.dryRun) return;
+
+    const chat = eventData.chat;
+    if (!chat || !Array.isArray(chat)) return;
+
+    console.log('[NeuroCore] CHAT_COMPLETION_PROMPT_READY — replacing history with plot');
+    console.log('[NeuroCore] Original chat messages:', chat.length);
+
+    // Identify which messages are "history" (user/assistant role, not system)
+    // Keep: system messages (character card, jailbreak, extensions) + last N user/assistant
+    const keepRecent = neuro.settings.plotKeepRecentMessages || 4;
+
+    // Find all user/assistant message indices
+    const historyIndices = [];
+    for (let i = 0; i < chat.length; i++) {
+      if (chat[i].role === 'user' || chat[i].role === 'assistant') {
+        historyIndices.push(i);
+      }
+    }
+
+    // Keep the last N history messages, remove the rest
+    const toKeep = new Set(historyIndices.slice(-keepRecent));
+    const toRemove = historyIndices.filter(i => !toKeep.has(i));
+
+    if (toRemove.length === 0) {
+      console.log('[NeuroCore] Not enough history to replace, skipping plot injection');
+      return;
+    }
+
+    // Find where to insert the plot (before the first kept message)
+    const firstKeptIdx = historyIndices.length > keepRecent
+      ? historyIndices[historyIndices.length - keepRecent]
+      : historyIndices[0];
+
+    // Remove old history messages (from end to start to preserve indices)
+    for (let i = toRemove.length - 1; i >= 0; i--) {
+      chat.splice(toRemove[i], 1);
+    }
+
+    // Find the new insertion point (after system messages, before kept history)
+    let insertAt = 0;
+    for (let i = 0; i < chat.length; i++) {
+      if (chat[i].role === 'user' || chat[i].role === 'assistant') {
+        insertAt = i;
+        break;
+      }
+    }
+
+    // Insert plot messages
+    for (let i = pendingPlotMessages.length - 1; i >= 0; i--) {
+      chat.splice(insertAt, 0, pendingPlotMessages[i]);
+    }
+
+    console.log('[NeuroCore] History replaced. Removed:', toRemove.length,
+      'messages. Kept:', keepRecent, 'recent. Injected:', pendingPlotMessages.length,
+      'plot messages. Final chat:', chat.length);
+
+    // Clear pending
+    pendingPlotMessages = null;
+  });
+
+  console.log('[NeuroCore] Prompt hooks registered (GENERATE_BEFORE_COMBINE_PROMPTS + CHAT_COMPLETION_PROMPT_READY)');
 }
 
 function escapeHtml(text) {
